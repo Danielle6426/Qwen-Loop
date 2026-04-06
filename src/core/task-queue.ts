@@ -213,11 +213,11 @@ export class TaskQueue implements ITaskQueue {
       throw new Error(`TaskQueue.updateTaskStatus: no task found with id "${taskId}"`);
     }
     task.status = status;
-    logger.debug(`🔄 Task status updated`, { 
+    logger.debug(`🔄 Task status updated`, {
       operation: 'queue.status',
-      task: taskId, 
-      status 
-    });
+      task: taskId,
+      status
+    }, 10000); // Sample this common message
   }
 
   /**

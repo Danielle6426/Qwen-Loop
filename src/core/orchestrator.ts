@@ -19,10 +19,10 @@ export class AgentOrchestrator implements IAgentOrchestrator {
       throw new Error('Cannot register null or undefined agent');
     }
     this.agents.set(agent.id, agent);
-    logger.debug(`📝 Agent registered: ${agent.name}`, { 
+    logger.debug(`📝 Agent registered: ${agent.name}`, {
       operation: 'orchestrator.agent',
-      agent: agent.name 
-    });
+      agent: agent.name
+    }, 10000); // Sample this common message
   }
 
   /**
@@ -82,8 +82,9 @@ export class AgentOrchestrator implements IAgentOrchestrator {
     logger.debug(`📤 Task assigned to agent: ${selectedAgent.name}`, {
       operation: 'orchestrator.assignment',
       agent: selectedAgent.name,
-      task: task.id
-    });
+      task: task.id,
+      priority: task.priority
+    }, 10000); // Sample to reduce verbosity
 
     return selectedAgent;
   }

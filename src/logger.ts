@@ -79,14 +79,17 @@ export const DEFAULT_LOG_ROTATION: LogRotationConfig = {
 export const DEFAULT_LOG_SAMPLING: LogSamplingConfig = {
   defaultInterval: 5000,
   rules: {
-    'No tasks in queue': 15000,
-    'Max concurrent tasks reached': 10000,
-    'Agent output received': 15000,
-    'Agent stderr received': 15000,
-    'Task status updated': 10000,
-    'Agent registered': 10000,
-    'Configuration loaded': 10000,
-    'No configuration file found': 30000
+    'No tasks in queue': 20000,
+    'Max concurrent tasks reached': 15000,
+    'Agent output received': 20000,
+    'Agent stderr received': 20000,
+    'Task status updated': 15000,
+    'Agent registered': 15000,
+    'Configuration loaded': 15000,
+    'No configuration file found': 60000,
+    'Task enqueued': 10000,
+    'Task dequeued': 10000,
+    'Task assigned to agent': 10000
   }
 };
 
@@ -270,13 +273,7 @@ class Logger {
           }
           return info;
         })(),
-        // Use a neutral format for the main logger (transports will apply their own formats)
-        winston.format.combine(
-          winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-          winston.format.printf(({ timestamp, level, message, ...meta }) => {
-            return `${timestamp} ${level.toUpperCase()} ${message}`;
-          })
-        )
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' })
       ),
       transports: [
         new winston.transports.Console({
@@ -362,8 +359,10 @@ class Logger {
     const enhancedMetadata = metadata ? { ...metadata } : {};
     if (metadata?.error) {
       const error = metadata.error;
-      // Keep the error object intact for the format handler
-      enhancedMetadata.error = error;
+      // Ensure error is an Error object for proper stack trace capture
+      if (!(error instanceof Error)) {
+        enhancedMetadata.error = new Error(typeof error === 'string' ? error : String(error));
+      }
     }
     this.logger.error(message, enhancedMetadata);
   }

@@ -133,11 +133,12 @@ export class QwenAgent extends BaseAgent {
 
     const startTime = Date.now();
 
-    logger.info(`▶️ Executing task`, {
+    logger.debug(`▶️ Executing task`, {
       operation: 'task.execution',
       agent: this.name,
       task: task.id,
-      description: task.description.slice(0, 80)
+      description: task.description.slice(0, 80),
+      model: this.config.model
     });
 
     // Build the command based on task description
@@ -159,14 +160,14 @@ export class QwenAgent extends BaseAgent {
         const text = data.toString();
         output += text;
 
-        // Log only significant output (errors or substantial content)
-        if (text.length > 50 && !text.includes('Progress')) {
-          logger.debug(`📝 Agent output received`, { 
+        // Only log significant output sporadically to reduce noise
+        if (text.length > 200 && !text.includes('Progress')) {
+          logger.debug(`📝 Agent output received (large chunk)`, {
             operation: 'task.execution',
-            agent: this.name, 
-            task: task.id, 
-            length: text.length 
-          }, 10000);
+            agent: this.name,
+            task: task.id,
+            length: text.length
+          }, 20000);
         }
 
         // Try to detect file operations from output
@@ -176,14 +177,14 @@ export class QwenAgent extends BaseAgent {
       qwenProcess.stderr.on('data', (data) => {
         const text = data.toString();
         errorOutput += text;
-        // Only log stderr if it's significant (not just warnings)
-        if (!text.includes('Warning') && !text.includes('warning')) {
-          logger.debug(`⚠️ Agent stderr received`, { 
+        // Only log stderr sporadically if it's significant
+        if (!text.includes('Warning') && !text.includes('warning') && text.length > 100) {
+          logger.debug(`⚠️ Agent stderr received`, {
             operation: 'task.execution',
-            agent: this.name, 
-            task: task.id, 
-            length: text.length 
-          }, 10000);
+            agent: this.name,
+            task: task.id,
+            length: text.length
+          }, 20000);
         }
       });
 

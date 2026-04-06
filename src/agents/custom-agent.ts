@@ -120,10 +120,11 @@ export class CustomAgent extends BaseAgent {
 
     const startTime = Date.now();
 
-    logger.info(`Executing task`, {
+    logger.debug(`▶️ Executing task`, {
       agent: this.name,
       task: task.id,
-      description: task.description.slice(0, 80)
+      description: task.description.slice(0, 80),
+      operation: 'task.execution'
     });
 
     // Build the command
@@ -144,9 +145,14 @@ export class CustomAgent extends BaseAgent {
       childProcess.stdout.on('data', (data: Buffer) => {
         const text = data.toString();
         output += text;
-        // Log only significant output
-        if (text.length > 50 && !text.includes('Progress')) {
-          logger.debug(`Agent output received`, { agent: this.name, task: task.id, length: text.length }, 10000);
+        // Only log significant output sporadically to reduce noise
+        if (text.length > 200 && !text.includes('Progress')) {
+          logger.debug(`📝 Agent output received (large chunk)`, {
+            agent: this.name,
+            task: task.id,
+            length: text.length,
+            operation: 'task.execution'
+          }, 20000);
         }
         this.parseFileOperations(text, filesModified, filesCreated);
       });
@@ -154,9 +160,14 @@ export class CustomAgent extends BaseAgent {
       childProcess.stderr.on('data', (data: Buffer) => {
         const text = data.toString();
         errorOutput += text;
-        // Only log stderr if it's significant (not just warnings)
-        if (!text.includes('Warning') && !text.includes('warning')) {
-          logger.debug(`Agent stderr received`, { agent: this.name, task: task.id, length: text.length }, 10000);
+        // Only log stderr sporadically if it's significant
+        if (!text.includes('Warning') && !text.includes('warning') && text.length > 100) {
+          logger.debug(`⚠️ Agent stderr received`, {
+            agent: this.name,
+            task: task.id,
+            length: text.length,
+            operation: 'task.execution'
+          }, 20000);
         }
       });
 

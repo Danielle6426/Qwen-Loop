@@ -62,6 +62,7 @@ export abstract class BaseAgent implements IAgent {
     this.name = config.name;
     this.type = config.type;
     this.config = config;
+    // Only log at debug level - not important for normal operation
     logger.debug(`🤖 Agent created: ${this.name}`, {
       agent: this.name,
       operation: 'agent.init'
@@ -127,10 +128,12 @@ export abstract class BaseAgent implements IAgent {
     task.startedAt = new Date();
     task.assignedAgent = this.id;
 
+    // Only log at debug level to reduce verbosity
     logger.debug(`▶️ Starting task execution`, {
       agent: this.name,
       task: task.id,
-      operation: 'task.execution'
+      operation: 'task.execution',
+      description: task.description.slice(0, 60)
     });
 
     try {
@@ -147,12 +150,8 @@ export abstract class BaseAgent implements IAgent {
         task.status = TaskStatus.FAILED;
         task.completedAt = new Date();
         task.error = result.error;
-        logger.warn(`⚠️ Task failed: ${this.name}`, {
-          agent: this.name,
-          task: task.id,
-          operation: 'task.failure',
-          error: result.error?.slice(0, 100)
-        });
+        // Task failure is already logged at error level in loop-manager
+        // Keep this at debug to avoid duplicate messages
       }
 
       logger.debug(`✅ Task execution finished`, {
