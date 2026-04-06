@@ -6,7 +6,7 @@
 
 ```bash
 # Install Qwen Code CLI globally
-npm install -g @anthropic-ai/qwen-code
+npm install -g @qwen-code/qwen-code
 
 # Or verify it's already installed
 qwen --help
@@ -135,7 +135,7 @@ Press `Ctrl+C` to gracefully shut down the system.
 - Edit `qwen-loop.config.json` and add agents
 
 **Issue**: "Qwen Code CLI not found"
-- Install Qwen Code CLI: `npm install -g @anthropic-ai/qwen-code`
+- Install Qwen Code CLI: `npm install -g @qwen-code/qwen-code`
 - Verify it's in PATH: `qwen --help`
 
 **Issue**: Agents not executing tasks

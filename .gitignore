@@ -5,11 +5,14 @@ node_modules/
 dist/
 
 # Logs
-logs/
-*.log
+logs/*.log
 
 # Configuration (keep your secrets safe)
 qwen-loop.config.json
+
+# Test artifacts
+src/test.ts
+hello.txt
 
 # Environment variables
 .env

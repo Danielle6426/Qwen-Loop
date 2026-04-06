@@ -36,7 +36,7 @@ First, make sure Qwen Code CLI is installed and available in your PATH:
 
 ```bash
 # Install Qwen Code CLI globally
-npm install -g @anthropic-ai/qwen-code
+npm install -g @qwen-code/qwen-code
 
 # Or verify it's already installed
 qwen --help
