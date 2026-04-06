@@ -41,7 +41,9 @@ export class ConfigManager {
         const configData = readFileSync(this.configPath, 'utf-8');
         const config = JSON.parse(configData);
 
-        logger.debug(`Configuration loaded from ${this.configPath}`);
+        logger.debug(`📄 Configuration loaded from ${this.configPath}`, {
+          operation: 'config.load'
+        });
         this.configLoadedFromFile = true;
 
         return {
@@ -51,17 +53,25 @@ export class ConfigManager {
         } as LoopConfig;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error(`Failed to load configuration: ${errorMessage}`);
-        
+        logger.error(`❌ Failed to load configuration`, {
+          operation: 'config.error',
+          configPath: this.configPath,
+          error: errorMessage
+        });
+
         if (strictMode) {
           throw new Error(`Failed to parse configuration file at ${this.configPath}: ${errorMessage}`);
         }
-        
-        logger.warn('Falling back to default configuration due to parse error');
+
+        logger.warn('⚠️ Falling back to default configuration due to parse error', {
+          operation: 'config.fallback'
+        });
         return this.getDefaultConfig();
       }
     } else {
-      logger.debug('No configuration file found, using defaults');
+      logger.debug('📝 No configuration file found, using defaults', {
+        operation: 'config.load'
+      });
       return this.getDefaultConfig();
     }
   }
@@ -91,10 +101,16 @@ export class ConfigManager {
       }
 
       writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
-      logger.debug(`Configuration saved to ${this.configPath}`);
+      logger.debug(`💾 Configuration saved to ${this.configPath}`, {
+        operation: 'config.save'
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`Failed to save configuration: ${errorMessage}`);
+      logger.error(`❌ Failed to save configuration`, {
+        operation: 'config.error',
+        configPath: this.configPath,
+        error: errorMessage
+      });
       throw new Error(`Failed to save configuration: ${errorMessage}`);
     }
   }
@@ -134,7 +150,10 @@ export class ConfigManager {
   addAgent(agentConfig: AgentConfig): void {
     this.config.agents.push(agentConfig);
     this.saveConfig();
-    logger.debug(`Agent added to configuration: ${agentConfig.name}`);
+    logger.debug(`➕ Agent added to configuration: ${agentConfig.name}`, {
+      operation: 'config.agent',
+      agent: agentConfig.name
+    });
   }
 
   /**
@@ -146,7 +165,10 @@ export class ConfigManager {
     if (index !== -1) {
       this.config.agents.splice(index, 1);
       this.saveConfig();
-      logger.debug(`Agent removed from configuration: ${agentName}`);
+      logger.debug(`➖ Agent removed from configuration: ${agentName}`, {
+        operation: 'config.agent',
+        agent: agentName
+      });
     }
   }
 

@@ -19,7 +19,10 @@ export class AgentOrchestrator implements IAgentOrchestrator {
       throw new Error('Cannot register null or undefined agent');
     }
     this.agents.set(agent.id, agent);
-    logger.debug(`Agent registered: ${agent.name}`, { agent: agent.name });
+    logger.debug(`📝 Agent registered: ${agent.name}`, { 
+      operation: 'orchestrator.agent',
+      agent: agent.name 
+    });
   }
 
   /**
@@ -31,7 +34,8 @@ export class AgentOrchestrator implements IAgentOrchestrator {
     if (agent) {
       // Cancel any running tasks
       agent.cancelTask().catch((error) => {
-        logger.error(`Error cancelling task during agent removal`, {
+        logger.error(`⚠️ Error cancelling task during agent removal`, {
+          operation: 'orchestrator.cleanup',
           agent: agent.name,
           error
         });
@@ -46,7 +50,10 @@ export class AgentOrchestrator implements IAgentOrchestrator {
         }
       }
 
-      logger.debug(`Agent removed: ${agent.name}`, { agent: agent.name });
+      logger.debug(`🗑️ Agent removed: ${agent.name}`, { 
+        operation: 'orchestrator.agent',
+        agent: agent.name 
+      });
     }
   }
 
@@ -59,7 +66,10 @@ export class AgentOrchestrator implements IAgentOrchestrator {
     const availableAgents = this.getAvailableAgents();
 
     if (availableAgents.length === 0) {
-      logger.warn('No available agents to assign task', { task: task.id });
+      logger.warn('⚠️ No available agents to assign task', { 
+        operation: 'orchestrator.assignment',
+        task: task.id 
+      });
       return null;
     }
 
@@ -69,7 +79,8 @@ export class AgentOrchestrator implements IAgentOrchestrator {
     this.taskAssignments.set(task.id, selectedAgent.id);
     task.assignedAgent = selectedAgent.id;
 
-    logger.debug(`Task assigned to agent: ${selectedAgent.name}`, {
+    logger.debug(`📤 Task assigned to agent: ${selectedAgent.name}`, {
+      operation: 'orchestrator.assignment',
       agent: selectedAgent.name,
       task: task.id
     });
@@ -154,14 +165,18 @@ export class AgentOrchestrator implements IAgentOrchestrator {
    * @throws Does not throw; logs errors for individual agent failures
    */
   async initializeAll(): Promise<void> {
-    logger.info('Initializing agents...');
+    logger.info('🔧 Initializing agents...', { operation: 'orchestrator.init' });
 
     const initPromises = Array.from(this.agents.values()).map(async (agent) => {
       try {
         await agent.initialize();
-        logger.debug(`Agent initialized: ${agent.name}`, { agent: agent.name });
+        logger.debug(`✅ Agent initialized: ${agent.name}`, { 
+          operation: 'orchestrator.init',
+          agent: agent.name 
+        });
       } catch (error) {
-        logger.error(`Failed to initialize agent ${agent.name}`, {
+        logger.error(`❌ Failed to initialize agent ${agent.name}`, {
+          operation: 'orchestrator.init',
           agent: agent.name,
           error
         });
@@ -170,7 +185,10 @@ export class AgentOrchestrator implements IAgentOrchestrator {
 
     await Promise.all(initPromises);
 
-    logger.info('Agent initialization complete', { count: this.agents.size });
+    logger.info('✅ Agent initialization complete', { 
+      operation: 'orchestrator.init',
+      count: this.agents.size 
+    });
   }
 
   /**
@@ -182,7 +200,8 @@ export class AgentOrchestrator implements IAgentOrchestrator {
       try {
         await agent.cancelTask();
       } catch (error) {
-        logger.error(`Error cancelling task during bulk cancel`, {
+        logger.error(`❌ Error cancelling task during bulk cancel`, {
+          operation: 'orchestrator.cleanup',
           agent: agent.name,
           error
         });

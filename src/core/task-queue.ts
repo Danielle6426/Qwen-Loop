@@ -52,7 +52,11 @@ export class TaskQueue implements ITaskQueue {
     const queue = this.priorityQueues.get(task.priority);
     if (queue) {
       queue.push(task);
-      logger.debug(`Task enqueued`, { task: task.id, priority: task.priority });
+      logger.debug(`📥 Task enqueued`, { 
+        operation: 'queue.enqueue',
+        task: task.id, 
+        priority: task.priority 
+      });
     } else {
       // This should be unreachable if TaskPriority enum is used correctly
       throw new Error(`TaskQueue.enqueue: invalid priority level "${task.priority}" for task "${task.id}"`);
@@ -80,7 +84,11 @@ export class TaskQueue implements ITaskQueue {
       const queue = this.priorityQueues.get(priority);
       if (queue && queue.length > 0) {
         const task = queue.shift()!;
-        logger.debug(`Task dequeued`, { task: task.id, priority: task.priority });
+        logger.debug(`📤 Task dequeued`, { 
+          operation: 'queue.dequeue',
+          task: task.id, 
+          priority: task.priority 
+        });
         return task;
       }
     }
@@ -205,7 +213,11 @@ export class TaskQueue implements ITaskQueue {
       throw new Error(`TaskQueue.updateTaskStatus: no task found with id "${taskId}")`);
     }
     task.status = status;
-    logger.debug(`Task status updated`, { task: taskId, status });
+    logger.debug(`🔄 Task status updated`, { 
+      operation: 'queue.status',
+      task: taskId, 
+      status 
+    });
   }
 
   /**

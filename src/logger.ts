@@ -1,11 +1,45 @@
 import winston from 'winston';
 import chalk from 'chalk';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Valid log levels supported by the logger
  */
 export const LOG_LEVELS = ['error', 'warn', 'info', 'debug'] as const;
 export type LogLevel = typeof LOG_LEVELS[number];
+
+/**
+ * Structured log entry format for file output
+ * Ensures consistent JSON schema for log analysis tools
+ */
+export interface StructuredLogEntry {
+  /** ISO 8601 timestamp */
+  timestamp: string;
+  /** Log level: error, warn, info, debug */
+  level: string;
+  /** Human-readable log message */
+  message: string;
+  /** Unique correlation ID for tracing related operations */
+  correlationId?: string;
+  /** Agent identifier */
+  agent?: string;
+  /** Task identifier */
+  task?: string;
+  /** Project name */
+  project?: string;
+  /** Duration in milliseconds */
+  duration?: number;
+  /** Error message and stack trace */
+  error?: string;
+  /** Error name for classification */
+  errorName?: string;
+  /** Error stack trace for debugging */
+  stack?: string;
+  /** Operation category (e.g., "task.lifecycle", "agent.init") */
+  operation?: string;
+  /** Additional structured metadata */
+  [key: string]: unknown;
+}
 
 /**
  * Log rotation configuration
@@ -22,12 +56,34 @@ export interface LogRotationConfig {
   maxFiles: number;
 }
 
+/**
+ * Log sampling configuration
+ * Controls deduplication behavior for verbose debug messages
+ */
+export interface LogSamplingConfig {
+  /** Default sampling interval in milliseconds */
+  defaultInterval?: number;
+  /** Custom sampling intervals for specific message patterns */
+  rules?: Record<string, number>;
+}
+
 /** Default log rotation configuration */
 export const DEFAULT_LOG_ROTATION: LogRotationConfig = {
   dirname: 'logs',
   filename: 'qwen-loop.log',
   maxsize: 5242880, // 5MB
   maxFiles: 5
+};
+
+/** Default log sampling configuration */
+export const DEFAULT_LOG_SAMPLING: LogSamplingConfig = {
+  defaultInterval: 5000,
+  rules: {
+    'No tasks in queue': 10000,
+    'Max concurrent tasks reached': 10000,
+    'Agent output received': 10000,
+    'Agent stderr received': 10000
+  }
 };
 
 /**
@@ -46,22 +102,11 @@ export interface LogMetadata {
   error?: Error | unknown;
   /** Task description snippet (auto-truncated) */
   description?: string;
+  /** Unique correlation ID for tracing related operations */
+  correlationId?: string;
+  /** Operation category for structured analysis */
+  operation?: string;
   /** Additional custom metadata */
-  [key: string]: unknown;
-}
-
-/**
- * Structured log entry format for file output
- */
-interface StructuredLogEntry {
-  timestamp: string;
-  level: string;
-  message: string;
-  agent?: string;
-  task?: string;
-  project?: string;
-  duration?: number;
-  error?: string;
   [key: string]: unknown;
 }
 
@@ -109,8 +154,10 @@ class Logger {
   private static instance: Logger;
   private logger: winston.Logger;
   private logSampling: Map<string, number> = new Map(); // Track sampling counters for deduplication
+  private samplingConfig: LogSamplingConfig;
 
-  private constructor(level: string = 'info') {
+  private constructor(level: string = 'info', samplingConfig?: LogSamplingConfig) {
+    this.samplingConfig = samplingConfig || DEFAULT_LOG_SAMPLING;
     // Console format: human-readable with colors
     const consoleFormat = winston.format.combine(
       winston.format.colorize(),
@@ -155,37 +202,55 @@ class Logger {
       winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
       winston.format.errors({ stack: true }),
       winston.format((info) => {
-        const structured: any = {
+        const structured: Record<string, unknown> = {
           timestamp: String(info.timestamp || ''),
           level: info.level,
           message: String(info.message || '')
         };
 
+        // Add core fields
+        if (info.correlationId) structured.correlationId = String(info.correlationId);
         if (info.agent) structured.agent = String(info.agent);
         if (info.task) structured.task = String(info.task);
         if (info.project) structured.project = String(info.project);
+        if (info.operation) structured.operation = String(info.operation);
         if (info.duration !== undefined && info.duration !== null) {
           structured.duration = Number(info.duration);
         }
+        
+        // Add description with truncation
         if (info.description) {
           structured.description = typeof info.description === 'string'
             ? info.description.slice(0, 200)
             : String(info.description);
         }
+        
+        // Handle errors with full context
         if (info.error) {
-          structured.error = info.error instanceof Error ? (info.error.stack || info.error.message) : String(info.error);
+          const error = info.error;
+          structured.error = error instanceof Error ? error.message : String(error);
+          if (error instanceof Error) {
+            structured.errorName = error.name;
+            structured.stack = error.stack || '';
+          }
         }
 
         // Add remaining metadata with truncation for long strings
+        const skipKeys = new Set([
+          'timestamp', 'level', 'message', 'correlationId', 'agent', 'task', 
+          'project', 'operation', 'duration', 'description', 'error', 'errorName', 
+          'stack', Symbol.for('level')
+        ]);
+        
         Object.entries(info).forEach(([key, value]) => {
-          if (!['timestamp', 'level', 'message', 'agent', 'task', 'project', 'duration', 'description', 'error', Symbol.for('level')].includes(key)) {
+          if (!skipKeys.has(key)) {
             structured[key] = typeof value === 'string' && value.length > 1000
               ? `${value.slice(0, 1000)}... [truncated]`
               : value;
           }
         });
 
-        return structured;
+        return structured as winston.Logform.TransformableInfo;
       })(),
       winston.format.json()
     );
@@ -201,7 +266,13 @@ class Logger {
           }
           return info;
         })(),
-        winston.format.combine(consoleFormat)
+        // Use a neutral format for the main logger (transports will apply their own formats)
+        winston.format.combine(
+          winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+          winston.format.printf(({ timestamp, level, message, ...meta }) => {
+            return `${timestamp} ${level.toUpperCase()} ${message}`;
+          })
+        )
       ),
       transports: [
         new winston.transports.Console({
@@ -249,11 +320,12 @@ class Logger {
   /**
    * Get or create the Logger singleton instance
    * @param level - Optional log level to set on creation
+   * @param samplingConfig - Optional sampling configuration
    * @returns The Logger instance
    */
-  static getInstance(level?: string): Logger {
+  static getInstance(level?: string, samplingConfig?: LogSamplingConfig): Logger {
     if (!Logger.instance) {
-      Logger.instance = new Logger(level);
+      Logger.instance = new Logger(level, samplingConfig);
     }
     return Logger.instance;
   }
@@ -286,9 +358,8 @@ class Logger {
     const enhancedMetadata = metadata ? { ...metadata } : {};
     if (metadata?.error) {
       const error = metadata.error;
-      enhancedMetadata.errorDetails = error instanceof Error 
-        ? { message: error.message, stack: error.stack, name: error.name }
-        : error;
+      // Keep the error object intact for the format handler
+      enhancedMetadata.error = error;
     }
     this.logger.error(message, enhancedMetadata);
   }
@@ -297,11 +368,20 @@ class Logger {
    * Log a debug message with automatic sampling to reduce verbosity
    * @param message - The message to log
    * @param metadata - Optional metadata (agent, task, project, duration, etc.)
-   * @param sampleInterval - Milliseconds between duplicate messages (default: 5000)
+   * @param sampleInterval - Milliseconds between duplicate messages (default: from sampling config)
    */
   debug(message: string, metadata?: LogMetadata, sampleInterval?: number) {
-    // Sample repetitive debug messages (e.g., "No tasks in queue" polling)
-    if (sampleInterval !== undefined && !this.shouldSample(message, sampleInterval)) {
+    // Determine sampling interval
+    let interval = sampleInterval;
+    if (interval === undefined) {
+      // Check for custom rules
+      const rules = this.samplingConfig.rules || {};
+      interval = Object.entries(rules).find(([pattern]) => message.includes(pattern))?.[1] 
+        ?? this.samplingConfig.defaultInterval;
+    }
+    
+    // Sample repetitive debug messages
+    if (interval !== undefined && !this.shouldSample(message, interval)) {
       return;
     }
     this.logger.debug(message, metadata);
@@ -318,6 +398,58 @@ class Logger {
 }
 
 export const logger = Logger.getInstance();
+
+/**
+ * Generate a new correlation ID for tracing related operations
+ * @returns A unique correlation ID
+ */
+export function createCorrelationId(): string {
+  return uuidv4();
+}
+
+/**
+ * Build standardized log metadata with correlation ID
+ * @param context - Context object with correlation ID, agent, task, project info
+ * @param extras - Additional metadata to include
+ * @returns Metadata object ready for logging
+ */
+export function buildLogContext(
+  context: { correlationId?: string; agent?: string; task?: string; project?: string; operation?: string },
+  extras?: Record<string, unknown>
+): LogMetadata {
+  const metadata: LogMetadata = {};
+
+  if (context.correlationId) metadata.correlationId = context.correlationId;
+  if (context.agent) metadata.agent = context.agent;
+  if (context.task) metadata.task = context.task;
+  if (context.project) metadata.project = context.project;
+  if (context.operation) metadata.operation = context.operation;
+
+  if (extras) {
+    Object.assign(metadata, extras);
+  }
+
+  return metadata;
+}
+
+/**
+ * Build error context for consistent error logging
+ * @param error - The error object or value
+ * @param extras - Additional context
+ * @returns Metadata object with error context
+ */
+export function buildErrorContext(
+  error: Error | unknown,
+  extras?: Record<string, unknown>
+): LogMetadata {
+  const metadata: LogMetadata = { error };
+  
+  if (extras) {
+    Object.assign(metadata, extras);
+  }
+  
+  return metadata;
+}
 
 /**
  * Set the global log level
@@ -341,27 +473,4 @@ export function createDurationTracker() {
     /** Get elapsed milliseconds since creation */
     elapsed: () => Date.now() - startTime
   };
-}
-
-/**
- * Build standardized log metadata from common context
- * @param context - Context object with agent, task, project info
- * @param extras - Additional metadata to include
- * @returns Sanitized metadata object ready for logging
- */
-export function buildLogContext(
-  context: { agent?: string; task?: string; project?: string },
-  extras?: Record<string, unknown>
-): LogMetadata {
-  const metadata: LogMetadata = {};
-  
-  if (context.agent) metadata.agent = context.agent;
-  if (context.task) metadata.task = context.task;
-  if (context.project) metadata.project = context.project;
-  
-  if (extras) {
-    Object.assign(metadata, extras);
-  }
-  
-  return metadata;
 }

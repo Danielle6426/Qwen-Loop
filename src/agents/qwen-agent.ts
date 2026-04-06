@@ -55,7 +55,11 @@ export class QwenAgent extends BaseAgent {
     this.workingDir = config.workingDirectory || process.cwd();
 
     if (!existsSync(this.workingDir)) {
-      logger.debug(`Creating working directory`, { agent: this.name, workingDir: this.workingDir });
+      logger.debug(`📁 Creating working directory`, { 
+        agent: this.name, 
+        workingDir: this.workingDir,
+        operation: 'agent.init'
+      });
       mkdirSync(this.workingDir, { recursive: true });
     }
   }
@@ -70,7 +74,10 @@ export class QwenAgent extends BaseAgent {
    * @throws Error if Qwen Code CLI is not found in PATH
    */
   protected async onInitialize(): Promise<void> {
-    logger.debug('Verifying Qwen Code CLI availability', { agent: this.name });
+    logger.debug('🔍 Verifying Qwen Code CLI availability', { 
+      agent: this.name,
+      operation: 'agent.init'
+    });
 
     return new Promise((resolve, reject) => {
       const checkProcess = spawn(this.qwenPath, ['--version'], {
@@ -116,7 +123,8 @@ export class QwenAgent extends BaseAgent {
 
     const startTime = Date.now();
 
-    logger.info(`Executing task`, {
+    logger.info(`▶️ Executing task`, {
+      operation: 'task.execution',
       agent: this.name,
       task: task.id,
       description: task.description.slice(0, 80)
@@ -143,7 +151,12 @@ export class QwenAgent extends BaseAgent {
 
         // Log only significant output (errors or substantial content)
         if (text.length > 50 && !text.includes('Progress')) {
-          logger.debug(`Agent output received`, { agent: this.name, task: task.id, length: text.length }, 10000);
+          logger.debug(`📝 Agent output received`, { 
+            operation: 'task.execution',
+            agent: this.name, 
+            task: task.id, 
+            length: text.length 
+          }, 10000);
         }
 
         // Try to detect file operations from output
@@ -155,13 +168,22 @@ export class QwenAgent extends BaseAgent {
         errorOutput += text;
         // Only log stderr if it's significant (not just warnings)
         if (!text.includes('Warning') && !text.includes('warning')) {
-          logger.debug(`Agent stderr received`, { agent: this.name, task: task.id, length: text.length }, 10000);
+          logger.debug(`⚠️ Agent stderr received`, { 
+            operation: 'task.execution',
+            agent: this.name, 
+            task: task.id, 
+            length: text.length 
+          }, 10000);
         }
       });
 
       // Handle abort signal
       signal.addEventListener('abort', () => {
-        logger.info('Task aborted by user', { agent: this.name, task: task.id });
+        logger.info('🚫 Task aborted by user', { 
+          operation: 'task.abort',
+          agent: this.name, 
+          task: task.id 
+        });
         qwenProcess.kill();
         resolve({
           success: false,
