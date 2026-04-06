@@ -5,6 +5,26 @@ import { platform } from 'os';
 import * as os from 'os';
 
 /**
+ * Type guard to validate HealthReport objects
+ *
+ * @param value - The value to check
+ * @returns True if the value is a valid HealthReport object
+ */
+function isHealthReport(value: unknown): value is HealthReport {
+  if (!value || typeof value !== 'object') return false;
+  const report = value as Record<string, unknown>;
+  return (
+    'status' in report &&
+    typeof report.status === 'string' &&
+    ['healthy', 'degraded', 'unhealthy'].includes(report.status as string) &&
+    'timestamp' in report && report.timestamp instanceof Date &&
+    'agents' in report && Array.isArray(report.agents) &&
+    'taskThroughput' in report && typeof report.taskThroughput === 'object' &&
+    'resources' in report && typeof report.resources === 'object'
+  );
+}
+
+/**
  * Health checker that collects comprehensive system metrics
  * including agent health, task throughput, error rates, and resource usage.
  */

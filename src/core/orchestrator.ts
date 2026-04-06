@@ -179,6 +179,10 @@ export class AgentOrchestrator implements IAgentOrchestrator {
 
   /**
    * Initialize all registered agents
+   *
+   * Attempts to initialize each registered agent in parallel. Agents that fail
+   * to initialize are logged but don't prevent other agents from initializing.
+   *
    * @throws Does not throw; logs errors for individual agent failures
    */
   async initializeAll(): Promise<void> {
@@ -187,24 +191,30 @@ export class AgentOrchestrator implements IAgentOrchestrator {
     const initPromises = Array.from(this.agents.values()).map(async (agent) => {
       try {
         await agent.initialize();
-        logger.debug(`✅ Agent initialized: ${agent.name}`, { 
+        logger.debug(`✅ Agent initialized: ${agent.name}`, {
           operation: 'orchestrator.init',
-          agent: agent.name 
+          agent: agent.name
         });
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         logger.error(`❌ Failed to initialize agent ${agent.name}`, {
           operation: 'orchestrator.init',
           agent: agent.name,
-          error
+          error: errorMessage
         });
+        // Agent remains in ERROR state from BaseAgent.initialize()
       }
     });
 
-    await Promise.all(initPromises);
+    await Promise.allSettled(initPromises);
 
-    logger.info('✅ Agent initialization complete', { 
+    const allAgents = Array.from(this.agents.values());
+    const initializedCount = allAgents.filter(a => a.getStatus() !== AgentStatus.ERROR).length;
+    logger.info('✅ Agent initialization complete', {
       operation: 'orchestrator.init',
-      count: this.agents.size 
+      count: this.agents.size,
+      initialized: initializedCount,
+      failed: this.agents.size - initializedCount
     });
   }
 

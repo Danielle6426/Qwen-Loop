@@ -2,6 +2,7 @@ import { LoopConfig, LoopStats, ProjectConfig, AgentConfig, AgentType, TaskPrior
 import { LoopManager } from './loop-manager.js';
 import { QwenAgent, CustomAgent } from '../agents/index.js';
 import { logger } from '../logger.js';
+import { HealthChecker } from './health-checker.js';
 
 /**
  * Manages multiple projects, each with its own LoopManager.
@@ -15,6 +16,9 @@ export class MultiProjectManager {
   private isRunning = false;
   private loopInterval: NodeJS.Timeout | null = null;
   private globalConfig: LoopConfig;
+  private statusCheckInterval: NodeJS.Timeout | null = null;
+  private healthUpdateInterval: NodeJS.Timeout | null = null;
+  private healthChecker: HealthChecker | null = null;
 
   /**
    * Creates a new MultiProjectManager instance.
@@ -128,50 +132,70 @@ export class MultiProjectManager {
 
   /**
    * Stop all project loops and clean up resources.
-   * Halts task processing across all managed projects and clears the scheduling interval.
+   *
+   * Halts task processing across all managed projects, clears all scheduling
+   * intervals, and stops the health update server if running.
+   *
+   * @throws Does not throw; logs errors for individual project failures
    */
   async stop(): Promise<void> {
     this.isRunning = false;
 
+    // Clear all intervals to prevent memory leaks
     if (this.loopInterval) {
       clearInterval(this.loopInterval);
       this.loopInterval = null;
     }
+    if (this.statusCheckInterval) {
+      clearInterval(this.statusCheckInterval);
+      this.statusCheckInterval = null;
+    }
+    if (this.healthUpdateInterval) {
+      clearInterval(this.healthUpdateInterval);
+      this.healthUpdateInterval = null;
+    }
 
     // Stop all loop managers
+    const stopPromises: Promise<void>[] = [];
     for (const [name, manager] of this.projectManagers) {
       if (manager.isRunning()) {
-        await manager.stop();
-        logger.info(`Stopped project "${name}"`);
+        stopPromises.push(
+          manager.stop().catch((error) => {
+            logger.error(`Error stopping project "${name}": ${error instanceof Error ? error.message : String(error)}`, {
+              operation: 'multi-project.stop',
+              project: name
+            });
+          })
+        );
+        logger.info(`Stopping project "${name}"`);
       }
     }
 
+    await Promise.all(stopPromises);
     logger.info('All projects stopped');
   }
 
   /**
    * Get combined health report across all projects.
-   * Aggregates agent health, task throughput, and priority/status breakdowns from all managed projects.
+   *
+   * Aggregates agent health, task throughput, and priority/status breakdowns
+   * from all managed projects into a single comprehensive report.
    *
    * @returns A comprehensive HealthReport covering all projects.
    * @throws Error if no projects have been initialized.
    */
   getHealthReport(): HealthReport {
     if (this.projectNames.length === 0) {
-      throw new Error('Cannot generate health report: no projects have been initialized. Call initialize() first.');
+      throw new Error('Cannot generate health report: no projects initialized. Call initialize() first.');
+    }
+
+    // Use cached healthChecker or create new one
+    if (!this.healthChecker) {
+      this.healthChecker = new HealthChecker();
     }
 
     // Combine stats from all projects into a single health report
-    // Use the first project's health checker as the base
-    const firstProject = this.projectManagers.get(this.projectNames[0]);
-    if (!firstProject) {
-      throw new Error('Cannot generate health report: first project manager not found despite being in project list.');
-    }
-
-    const baseReport = firstProject.getHealthReport();
-
-    // Aggregate agent information from all projects
-    const allAgents: AgentHealthStatus[] = [];
+    const allAgents: IAgent[] = [];
     let totalCompleted = 0;
     let totalFailed = 0;
     let totalExecutionTime = 0;
@@ -180,12 +204,17 @@ export class MultiProjectManager {
     for (const name of this.projectNames) {
       const manager = this.projectManagers.get(name);
       if (!manager) {
-        logger.warn(`Project manager not found for "${name}" during health report generation`);
+        logger.warn(`Project manager not found for "${name}" during health report generation`, {
+          operation: 'multi-project.health'
+        });
         continue;
       }
 
+      // Collect actual agent instances from orchestrator
+      const projectAgents = manager.getOrchestrator().getAllAgents();
+      allAgents.push(...projectAgents);
+
       const projectReport = manager.getHealthReport();
-      allAgents.push(...projectReport.agents);
       totalCompleted += projectReport.taskThroughput.completedTasks;
       totalFailed += projectReport.taskThroughput.failedTasks;
       totalExecutionTime += projectReport.taskThroughput.averageExecutionTime * projectReport.taskThroughput.completedTasks;
@@ -195,65 +224,24 @@ export class MultiProjectManager {
       allTasks.push(...allProjectTasks);
     }
 
-    // Update the base report with combined data
-    baseReport.agents = allAgents;
-    baseReport.taskThroughput.completedTasks = totalCompleted;
-    baseReport.taskThroughput.failedTasks = totalFailed;
-    baseReport.taskThroughput.totalTasks = totalCompleted + totalFailed;
-    baseReport.taskThroughput.averageExecutionTime = totalCompleted > 0 ? totalExecutionTime / totalCompleted : 0;
+    // Update health checker with aggregated data
+    this.healthChecker.updateAgents(allAgents);
+    this.healthChecker.updateLoopStats({
+      completedTasks: totalCompleted,
+      failedTasks: totalFailed,
+      totalExecutionTime,
+      maxConcurrentTasks: this.globalConfig.maxConcurrentTasks,
+      loopInterval: this.globalConfig.loopInterval,
+      maxRetries: this.globalConfig.maxRetries,
+      workingDirectory: this.globalConfig.workingDirectory
+    });
+    this.healthChecker.updateTaskQueue(allTasks.map(t => ({
+      id: t.id,
+      status: t.status,
+      priority: t.priority
+    })));
 
-    const totalTasks = totalCompleted + totalFailed;
-    baseReport.taskThroughput.errorRate = totalTasks > 0 ? (totalFailed / totalTasks) * 100 : 0;
-    baseReport.taskThroughput.successRate = totalTasks > 0 ? (totalCompleted / totalTasks) * 100 : 100;
-
-    // Recalculate priority and status breakdown
-    const byPriority: Record<TaskPriority, number> = {
-      [TaskPriority.CRITICAL]: 0,
-      [TaskPriority.HIGH]: 0,
-      [TaskPriority.MEDIUM]: 0,
-      [TaskPriority.LOW]: 0
-    };
-    const byStatus: Record<TaskStatus, number> = {
-      [TaskStatus.PENDING]: 0,
-      [TaskStatus.RUNNING]: 0,
-      [TaskStatus.COMPLETED]: 0,
-      [TaskStatus.FAILED]: 0,
-      [TaskStatus.CANCELLED]: 0
-    };
-
-    for (const task of allTasks) {
-      const priorityKey = task.priority as TaskPriority;
-      const statusKey = task.status as TaskStatus;
-      byPriority[priorityKey] = (byPriority[priorityKey] || 0) + 1;
-      byStatus[statusKey] = (byStatus[statusKey] || 0) + 1;
-    }
-
-    baseReport.priorityBreakdown = { byPriority, byStatus };
-    baseReport.config.agentCount = allAgents.length;
-
-    // Update warnings and errors from all projects
-    const allWarnings: string[] = [];
-    const allErrors: string[] = [];
-    for (const name of this.projectNames) {
-      const manager = this.projectManagers.get(name);
-      if (!manager) continue;
-      const projectReport = manager.getHealthReport();
-      allWarnings.push(...projectReport.warnings);
-      allErrors.push(...projectReport.errors);
-    }
-    baseReport.warnings = allWarnings;
-    baseReport.errors = allErrors;
-
-    // Recalculate overall status based on aggregated data
-    if (allErrors.length > 0) {
-      baseReport.status = 'unhealthy';
-    } else if (allWarnings.length > 0 || allAgents.some(a => !a.healthy)) {
-      baseReport.status = 'degraded';
-    } else {
-      baseReport.status = 'healthy';
-    }
-
-    return baseReport;
+    return this.healthChecker.getJsonReport();
   }
 
   /**
@@ -393,16 +381,18 @@ export class MultiProjectManager {
 
       // Wait for the project to complete its max iterations or stop
       // Check every 5 seconds
-      const checkInterval = setInterval(async () => {
+      this.statusCheckInterval = setInterval(async () => {
         if (!this.isRunning) {
-          clearInterval(checkInterval);
+          clearInterval(this.statusCheckInterval!);
+          this.statusCheckInterval = null;
           return;
         }
 
         try {
           const isProjectRunning = manager.isRunning();
           if (!isProjectRunning) {
-            clearInterval(checkInterval);
+            clearInterval(this.statusCheckInterval!);
+            this.statusCheckInterval = null;
             logger.info(`Project "${projectName}" completed its tasks`);
 
             // Move to next project

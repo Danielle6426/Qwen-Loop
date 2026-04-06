@@ -26,13 +26,30 @@ export class ConfigManager {
 
   /**
    * Create a new ConfigManager
+   *
    * @param configPath - Optional path to configuration file (defaults to qwen-loop.config.json in CWD)
    * @param strictMode - If true, throws errors on invalid config instead of falling back to defaults
+   * @throws Error if configPath is provided but is not a valid non-empty string
    */
   constructor(configPath?: string, strictMode: boolean = false) {
+    // Validate configPath if provided
+    if (configPath !== undefined && (typeof configPath !== 'string' || configPath.trim().length === 0)) {
+      throw new Error('ConfigManager: configPath must be a valid non-empty string');
+    }
+
     this.configPath = configPath || join(process.cwd(), 'qwen-loop.config.json');
     this.configLoadedFromFile = false;
-    this.config = this.loadConfig(strictMode);
+
+    try {
+      this.config = this.loadConfig(strictMode);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`❌ ConfigManager initialization failed: ${errorMessage}`, {
+        operation: 'config.init',
+        configPath: this.configPath
+      });
+      throw error;
+    }
   }
 
   private loadConfig(strictMode: boolean = false): LoopConfig {

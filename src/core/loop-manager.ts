@@ -364,7 +364,25 @@ export class LoopManager implements ILoopManager {
     task.status = TaskStatus.RUNNING;
 
     try {
-      const result = await agent.executeTask(task);
+      let result: AgentResult;
+      try {
+        result = await agent.executeTask(task);
+      } catch (agentError) {
+        // Handle unexpected agent execution errors
+        const agentErrorMessage = agentError instanceof Error ? agentError.message : String(agentError);
+        logger.error('❌ Unexpected agent execution error', {
+          operation: 'task.agent-error',
+          task: task.id,
+          agent: task.assignedAgent,
+          error: agentErrorMessage
+        });
+
+        result = {
+          success: false,
+          error: `Agent execution failed: ${agentErrorMessage}`,
+          executionTime: 0
+        };
+      }
 
       // Count iteration after task completes
       this.loopIterationCount++;
@@ -384,13 +402,23 @@ export class LoopManager implements ILoopManager {
         }
 
         // Auto commit and push after each task
-        const commitMsg = `chore(ai): ${task.description.slice(0, 72)}`;
-        const gitResult = await gitCommitPush(commitMsg, this.config.workingDirectory);
-        if (!gitResult.success) {
-          logger.warn(`⚠️ Git auto-commit failed`, {
-            operation: 'git.commit',
+        try {
+          const commitMsg = `chore(ai): ${task.description.slice(0, 72)}`;
+          const gitResult = await gitCommitPush(commitMsg, this.config.workingDirectory);
+          if (!gitResult.success) {
+            logger.warn(`⚠️ Git auto-commit failed`, {
+              operation: 'git.commit',
+              task: task.id,
+              exitCode: gitResult.output.slice(0, 100)
+            });
+          }
+        } catch (gitError) {
+          // Log git errors but don't fail the task
+          const gitErrorMessage = gitError instanceof Error ? gitError.message : String(gitError);
+          logger.warn(`⚠️ Git auto-commit encountered an error`, {
+            operation: 'git.error',
             task: task.id,
-            exitCode: gitResult.output.slice(0, 100)
+            error: gitErrorMessage
           });
         }
       } else {
