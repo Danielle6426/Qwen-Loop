@@ -75,21 +75,28 @@ export const DEFAULT_LOG_ROTATION: LogRotationConfig = {
   maxFiles: 5
 };
 
-/** Default log sampling configuration */
+/** Default log sampling configuration
+ * 
+ * Sampling intervals are optimized for production use:
+ * - High-frequency messages (queue status, agent registration): 10-20s
+ * - Medium-frequency messages (task assignments, retries): 10-15s
+ * - Low-frequency messages (config loading): 15-60s
+ * - All other debug messages: 5s default
+ */
 export const DEFAULT_LOG_SAMPLING: LogSamplingConfig = {
   defaultInterval: 5000,
   rules: {
-    'No tasks in queue': 20000,
-    'Max concurrent tasks reached': 15000,
-    'Agent output received': 20000,
-    'Agent stderr received': 20000,
-    'Task status updated': 15000,
-    'Agent registered': 15000,
-    'Configuration loaded': 15000,
-    'No configuration file found': 60000,
-    'Task enqueued': 10000,
-    'Task dequeued': 10000,
-    'Task assigned to agent': 10000
+    'No tasks in queue': 20000,           // High-frequency during idle periods
+    'Max concurrent tasks reached': 15000, // Medium-frequency during load
+    'Agent output received': 20000,       // Removed (no longer logged)
+    'Agent stderr received': 20000,       // Removed (no longer logged)
+    'Task status updated': 15000,         // Low-frequency status changes
+    'Agent registered': 15000,            // One-time during startup
+    'Configuration loaded': 15000,        // One-time during startup
+    'No configuration file found': 60000, // Rare, long interval
+    'Task enqueued': 10000,               // Medium-frequency
+    'Task dequeued': 10000,               // Medium-frequency
+    'Task assigned to agent': 10000       // Medium-frequency
   }
 };
 

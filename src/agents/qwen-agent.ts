@@ -160,40 +160,21 @@ export class QwenAgent extends BaseAgent {
         const text = data.toString();
         output += text;
 
-        // Only log significant output sporadically to reduce noise
-        if (text.length > 200 && !text.includes('Progress')) {
-          logger.debug(`📝 Agent output received (large chunk)`, {
-            operation: 'task.execution',
-            agent: this.name,
-            task: task.id,
-            length: text.length
-          }, 20000);
-        }
-
         // Try to detect file operations from output
         this.parseFileOperations(text, filesModified, filesCreated);
       });
 
       qwenProcess.stderr.on('data', (data) => {
-        const text = data.toString();
-        errorOutput += text;
-        // Only log stderr sporadically if it's significant
-        if (!text.includes('Warning') && !text.includes('warning') && text.length > 100) {
-          logger.debug(`⚠️ Agent stderr received`, {
-            operation: 'task.execution',
-            agent: this.name,
-            task: task.id,
-            length: text.length
-          }, 20000);
-        }
+        errorOutput += data.toString();
       });
 
       // Handle abort signal
       signal.addEventListener('abort', () => {
-        logger.info('🚫 Task aborted by user', { 
+        logger.info('🚫 Task cancelled by user', {
           operation: 'task.abort',
-          agent: this.name, 
-          task: task.id 
+          agent: this.name,
+          task: task.id,
+          duration: Date.now() - startTime
         });
         qwenProcess.kill();
         resolve({
@@ -205,6 +186,16 @@ export class QwenAgent extends BaseAgent {
 
       qwenProcess.on('close', (code) => {
         const success = code === 0;
+
+        logger.debug(`🏁 Qwen process completed`, {
+          operation: 'task.execution',
+          agent: this.name,
+          task: task.id,
+          exitCode: code,
+          success,
+          outputLength: output.length,
+          errorLength: errorOutput.length
+        });
 
         resolve({
           success,

@@ -235,7 +235,7 @@ export class LoopManager implements ILoopManager {
 
     this.taskQueue.enqueue(task);
     logger.debug(`📥 Task enqueued`, {
-      operation: 'task.queue',
+      operation: 'queue.enqueue',
       task: task.id,
       priority,
       description: description.slice(0, 60)
@@ -337,7 +337,7 @@ export class LoopManager implements ILoopManager {
     }
 
     if (!task) {
-      logger.debug('📭 No tasks in queue', { operation: 'task.queue' }, 10000);
+      logger.debug('📭 No tasks in queue', { operation: 'queue.status' }, 10000);
       return;
     }
 
@@ -372,10 +372,10 @@ export class LoopManager implements ILoopManager {
         // Handle unexpected agent execution errors
         const agentErrorMessage = agentError instanceof Error ? agentError.message : String(agentError);
         logger.error('❌ Unexpected agent execution error', {
-          operation: 'task.agent-error',
+          operation: 'task.execution',
           task: task.id,
           agent: task.assignedAgent,
-          error: agentErrorMessage
+          error: agentError instanceof Error ? agentError : new Error(agentErrorMessage)
         });
 
         result = {

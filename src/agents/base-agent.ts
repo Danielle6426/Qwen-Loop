@@ -146,21 +146,26 @@ export abstract class BaseAgent implements IAgent {
         task.status = TaskStatus.COMPLETED;
         task.completedAt = new Date();
         task.result = result.output;
+        logger.debug(`✅ Task completed successfully`, {
+          agent: this.name,
+          task: task.id,
+          operation: 'task.execution',
+          duration: executionTime
+        });
       } else {
         task.status = TaskStatus.FAILED;
         task.completedAt = new Date();
         task.error = result.error;
-        // Task failure is already logged at error level in loop-manager
-        // Keep this at debug to avoid duplicate messages
+        // Task failure is logged at error level in loop-manager
+        // Keep this at debug to avoid duplicate error messages
+        logger.debug(`❌ Task failed`, {
+          agent: this.name,
+          task: task.id,
+          operation: 'task.execution',
+          duration: executionTime,
+          error: result.error?.slice(0, 200)
+        });
       }
-
-      logger.debug(`✅ Task execution finished`, {
-        agent: this.name,
-        task: task.id,
-        operation: 'task.execution',
-        duration: executionTime,
-        success: result.success
-      });
 
       return result;
     } catch (error) {
@@ -171,11 +176,12 @@ export abstract class BaseAgent implements IAgent {
       task.completedAt = new Date();
       task.error = errorMessage;
 
-      logger.error('❌ Task execution error', {
+      // Log at debug level - loop-manager will log at error level with full context
+      logger.debug(`❌ Task execution error`, {
         agent: this.name,
         task: task.id,
-        operation: 'task.error',
-        error // Pass original Error object to capture stack trace
+        operation: 'task.execution',
+        error: errorMessage
       });
 
       return {
@@ -213,6 +219,11 @@ export abstract class BaseAgent implements IAgent {
 
       if (this.currentTask && this.currentTask.status !== TaskStatus.CANCELLED) {
         this.currentTask.status = TaskStatus.CANCELLED;
+        logger.debug(`✅ Task cancelled`, {
+          agent: this.name,
+          task: this.currentTask.id,
+          operation: 'task.cancel'
+        });
       }
 
       this.currentTask = null;
