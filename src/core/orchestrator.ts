@@ -19,10 +19,10 @@ export class AgentOrchestrator implements IAgentOrchestrator {
       throw new Error('Cannot register null or undefined agent');
     }
     this.agents.set(agent.id, agent);
-    logger.debug(`📝 Agent registered: ${agent.name}`, {
-      operation: 'orchestrator.agent',
+    logger.debug(`📝 Agent registered`, {
+      operation: 'orchestrator.lifecycle',
       agent: agent.name
-    }, 10000); // Sample this common message
+    }, 15000); // Sample this common startup message
   }
 
   /**
@@ -50,8 +50,8 @@ export class AgentOrchestrator implements IAgentOrchestrator {
         }
       }
 
-      logger.debug(`🗑️ Agent removed: ${agent.name}`, {
-        operation: 'orchestrator.agent',
+      logger.debug(`🗑️ Agent removed`, {
+        operation: 'orchestrator.lifecycle',
         agent: agent.name
       });
     }
@@ -79,12 +79,12 @@ export class AgentOrchestrator implements IAgentOrchestrator {
     this.taskAssignments.set(task.id, selectedAgent.id);
     task.assignedAgent = selectedAgent.id;
 
-    logger.debug(`📤 Task assigned to agent: ${selectedAgent.name}`, {
+    logger.debug(`📤 Task assigned to agent`, {
       operation: 'orchestrator.assignment',
       agent: selectedAgent.name,
       task: task.id,
       priority: task.priority
-    }, 10000); // Sample to reduce verbosity
+    }, 15000); // Sample to reduce verbosity
 
     return selectedAgent;
   }
@@ -186,18 +186,18 @@ export class AgentOrchestrator implements IAgentOrchestrator {
    * @throws Does not throw; logs errors for individual agent failures
    */
   async initializeAll(): Promise<void> {
-    logger.info('🔧 Initializing agents...', { operation: 'orchestrator.init' });
+    logger.debug('🔧 Initializing agents...', { operation: 'orchestrator.lifecycle' });
 
     const initPromises = Array.from(this.agents.values()).map(async (agent) => {
       try {
         await agent.initialize();
-        logger.debug(`✅ Agent initialized: ${agent.name}`, {
-          operation: 'orchestrator.init',
+        logger.debug(`✅ Agent initialized`, {
+          operation: 'orchestrator.lifecycle',
           agent: agent.name
         });
       } catch (error) {
-        logger.error(`❌ Failed to initialize agent ${agent.name}`, {
-          operation: 'orchestrator.init',
+        logger.error(`❌ Agent initialization failed`, {
+          operation: 'orchestrator.lifecycle',
           agent: agent.name,
           error: error instanceof Error ? error : new Error(String(error))
         });
@@ -209,8 +209,8 @@ export class AgentOrchestrator implements IAgentOrchestrator {
 
     const allAgents = Array.from(this.agents.values());
     const initializedCount = allAgents.filter(a => a.getStatus() !== AgentStatus.ERROR).length;
-    logger.info('✅ Agent initialization complete', {
-      operation: 'orchestrator.init',
+    logger.info(`✅ Agent initialization complete`, {
+      operation: 'orchestrator.lifecycle',
       count: this.agents.size,
       initialized: initializedCount,
       failed: this.agents.size - initializedCount

@@ -58,8 +58,9 @@ export class ConfigManager {
         const configData = readFileSync(this.configPath, 'utf-8');
         const config = JSON.parse(configData);
 
-        logger.debug(`📄 Configuration loaded from ${this.configPath}`, {
-          operation: 'config.load'
+        logger.debugOnce(`📄 Configuration loaded`, {
+          operation: 'config.load',
+          configPath: this.configPath
         });
         this.configLoadedFromFile = true;
 
@@ -88,7 +89,7 @@ export class ConfigManager {
     } else {
       logger.debug('📝 No configuration file found, using defaults', {
         operation: 'config.load'
-      });
+      }, 60000);
       return this.getDefaultConfig();
     }
   }

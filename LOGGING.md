@@ -23,17 +23,44 @@ Repetitive debug messages are automatically deduplicated to reduce noise:
 
 ### ✅ Operation Tagging
 Every log includes an `operation` field for categorization:
+
+#### Lifecycle Operations
 - `loop.lifecycle` - Loop start/stop/pause/resume
 - `loop.init` - Initialization operations
+- `loop.throttle` - Throttling/concurrency limits
+- `loop.error` - Loop iteration errors
+
+#### Task Operations
 - `task.lifecycle` - Task enqueue/execute/complete
+- `task.execution` - Task execution details
 - `task.retry` - Task retry attempts
 - `task.failure` - Failed tasks
-- `queue.enqueue` / `queue.dequeue` - Queue operations
+- `task.generation` - Self-generated tasks
+- `task.cancel` - Task cancellation
+
+#### Queue Operations
+- `queue.enqueue` - Task enqueued
+- `queue.dequeue` - Task dequeued
+- `queue.status` - Task status updates
+
+#### Agent Operations
 - `agent.init` - Agent initialization
-- `task.execution` - Task execution details
-- `orchestrator.assignment` - Task assignment
+- `agent.error` - Agent errors
+
+#### Orchestrator Operations
+- `orchestrator.lifecycle` - Agent registration, initialization, removal
+- `orchestrator.assignment` - Task assignment to agents
+- `orchestrator.cleanup` - Task cancellation during cleanup
+
+#### Configuration Operations
 - `config.load` / `config.save` - Configuration operations
+- `config.agent` - Agent configuration changes
+- `config.error` - Configuration errors
+- `config.fallback` - Fallback to defaults
+
+#### Git Operations
 - `git.commit` - Git auto-commit operations
+- `git.error` - Git errors
 
 ### ✅ Enhanced Error Context
 Error logs include:
@@ -63,13 +90,35 @@ Error logs include:
   "correlationId": "550e8400-e29b-41d4-a716-446655440000",
   "task": "task-123",
   "agent": "qwen-agent-1",
+  "project": "my-project",
   "duration": 3450,
   "description": "Refactor authentication module",
   "error": "Error message (if applicable)",
   "errorName": "Error (if applicable)",
-  "stack": "Stack trace (if applicable)"
+  "stack": "Stack trace (if applicable)",
+  "priority": "HIGH",
+  "exitCode": 0
 }
 ```
+
+### Schema Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `timestamp` | string | ISO 8601 timestamp |
+| `level` | string | Log level: error, warn, info, debug |
+| `message` | string | Human-readable log message |
+| `operation` | string | Operation category for filtering (e.g., `task.lifecycle`) |
+| `correlationId` | string? | Unique ID for tracing related operations |
+| `task` | string? | Task identifier |
+| `agent` | string? | Agent identifier |
+| `project` | string? | Project name (multi-project mode) |
+| `duration` | number? | Operation duration in milliseconds |
+| `description` | string? | Task or operation description (truncated to 200 chars) |
+| `error` | string? | Error message |
+| `errorName` | string? | Error constructor name for classification |
+| `stack` | string? | Full stack trace (error logs only) |
+| Other fields | any | Additional metadata (priority, exitCode, etc.) |
 
 ## Console Output Format
 
@@ -117,11 +166,13 @@ logger.debug('Queue empty', {
 ### Helper Functions
 
 ```typescript
-import { 
-  createCorrelationId, 
-  buildLogContext, 
+import {
+  createCorrelationId,
+  buildLogContext,
   buildErrorContext,
-  createDurationTracker 
+  createDurationTracker,
+  withCorrelationId,
+  getLogSeverity
 } from '../logger.js';
 
 // Generate correlation ID for tracing related operations
@@ -144,9 +195,21 @@ const errorContext = buildErrorContext(error, {
 // Track duration
 const tracker = createDurationTracker();
 // ... perform operation ...
-logger.info('Operation complete', { 
-  duration: tracker.elapsed() 
+logger.info('Operation complete', {
+  duration: tracker.elapsed()
 });
+
+// Execute with automatic correlation ID tracking
+await withCorrelationId(async () => {
+  logger.info('Starting operation', { task: taskId });
+  await performOperation(taskId);
+  logger.info('Operation complete', { task: taskId });
+});
+// Correlation ID automatically set for all logs within this scope
+
+// Get severity metadata for analysis
+const severity = getLogSeverity('error');
+// Returns: { severity: 'error', actionable: true, audience: 'operations' }
 ```
 
 ## Configuration
@@ -304,12 +367,22 @@ logger.info('Task started', {
 For complex operations, generate correlation IDs to trace related events:
 
 ```typescript
+// Method 1: Manual correlation ID management
 const correlationId = createCorrelationId();
-logger.info('Starting complex operation', { correlationId });
-// ... later ...
-logger.info('Step 1 complete', { correlationId });
-// ... later ...
-logger.info('Operation complete', { correlationId });
+logger.setCorrelationId(correlationId);
+logger.info('Starting operation', { task: taskId });
+// ... all subsequent logs include this correlationId ...
+logger.clearCorrelationId();
+
+// Method 2: Scoped correlation ID (recommended)
+await withCorrelationId(async () => {
+  logger.info('Step 1 starting', { task: taskId });
+  await step1(taskId);
+  logger.info('Step 1 complete', { task: taskId });
+  await step2(taskId);
+  logger.info('Step 2 complete', { task: taskId });
+});
+// Correlation ID automatically cleared after scope
 ```
 
 ### 7. Use One-Time Logging for Rare Events
@@ -347,3 +420,5 @@ Potential improvements:
 - [ ] Per-module log levels
 - [ ] Log compression for rotated files
 - [ ] Real-time log streaming API
+- [ ] Log retention policies based on severity
+- [ ] Structured query API for log analysis

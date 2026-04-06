@@ -76,27 +76,29 @@ export const DEFAULT_LOG_ROTATION: LogRotationConfig = {
 };
 
 /** Default log sampling configuration
- * 
+ *
  * Sampling intervals are optimized for production use:
  * - High-frequency messages (queue status, agent registration): 10-20s
  * - Medium-frequency messages (task assignments, retries): 10-15s
  * - Low-frequency messages (config loading): 15-60s
  * - All other debug messages: 5s default
+ *
+ * Note: Some previously verbose messages (e.g., stdout/stderr chunks, 
+ * queue enqueue/dequeue) are now sampled at 10s intervals in their 
+ * respective modules rather than relying solely on this config.
  */
 export const DEFAULT_LOG_SAMPLING: LogSamplingConfig = {
   defaultInterval: 5000,
   rules: {
     'No tasks in queue': 20000,           // High-frequency during idle periods
     'Max concurrent tasks reached': 15000, // Medium-frequency during load
-    'Agent output received': 20000,       // Removed (no longer logged)
-    'Agent stderr received': 20000,       // Removed (no longer logged)
     'Task status updated': 15000,         // Low-frequency status changes
     'Agent registered': 15000,            // One-time during startup
     'Configuration loaded': 15000,        // One-time during startup
     'No configuration file found': 60000, // Rare, long interval
-    'Task enqueued': 10000,               // Medium-frequency
-    'Task dequeued': 10000,               // Medium-frequency
-    'Task assigned to agent': 10000       // Medium-frequency
+    'Task enqueued': 10000,               // Medium-frequency (sampled in task-queue.ts)
+    'Task dequeued': 10000,               // Medium-frequency (sampled in task-queue.ts)
+    'Task assigned to agent': 15000       // Medium-frequency
   }
 };
 
@@ -169,6 +171,7 @@ class Logger {
   private logger: winston.Logger;
   private logSampling: Map<string, number> = new Map(); // Track sampling counters for deduplication
   private samplingConfig: LogSamplingConfig;
+  private currentCorrelationId: string | null = null; // Track current operation correlation ID
 
   private constructor(level: string = 'info', samplingConfig?: LogSamplingConfig) {
     this.samplingConfig = samplingConfig || DEFAULT_LOG_SAMPLING;
@@ -339,12 +342,39 @@ class Logger {
   }
 
   /**
+   * Set a correlation ID for tracing related operations
+   * @param correlationId - The correlation ID to use for subsequent logs
+   */
+  setCorrelationId(correlationId: string | null): void {
+    this.currentCorrelationId = correlationId;
+  }
+
+  /**
+   * Get the current correlation ID
+   * @returns The current correlation ID or null
+   */
+  getCorrelationId(): string | null {
+    return this.currentCorrelationId;
+  }
+
+  /**
+   * Clear the current correlation ID
+   */
+  clearCorrelationId(): void {
+    this.currentCorrelationId = null;
+  }
+
+  /**
    * Log an informational message
    * @param message - The message to log
    * @param metadata - Optional metadata (agent, task, project, duration, etc.)
    */
   info(message: string, metadata?: LogMetadata) {
-    this.logger.info(message, metadata);
+    const enhancedMetadata = metadata ? { ...metadata } : {};
+    if (this.currentCorrelationId && !enhancedMetadata.correlationId) {
+      enhancedMetadata.correlationId = this.currentCorrelationId;
+    }
+    this.logger.info(message, enhancedMetadata);
   }
 
   /**
@@ -353,7 +383,11 @@ class Logger {
    * @param metadata - Optional metadata (agent, task, project, duration, etc.)
    */
   warn(message: string, metadata?: LogMetadata) {
-    this.logger.warn(message, metadata);
+    const enhancedMetadata = metadata ? { ...metadata } : {};
+    if (this.currentCorrelationId && !enhancedMetadata.correlationId) {
+      enhancedMetadata.correlationId = this.currentCorrelationId;
+    }
+    this.logger.warn(message, enhancedMetadata);
   }
 
   /**
@@ -362,8 +396,11 @@ class Logger {
    * @param metadata - Optional metadata (agent, task, project, error, etc.)
    */
   error(message: string, metadata?: LogMetadata) {
-    // Always include full error details in file logs
     const enhancedMetadata = metadata ? { ...metadata } : {};
+    if (this.currentCorrelationId && !enhancedMetadata.correlationId) {
+      enhancedMetadata.correlationId = this.currentCorrelationId;
+    }
+    // Always include full error details in file logs
     if (metadata?.error) {
       const error = metadata.error;
       // Ensure error is an Error object for proper stack trace capture
@@ -386,15 +423,20 @@ class Logger {
     if (interval === undefined) {
       // Check for custom rules
       const rules = this.samplingConfig.rules || {};
-      interval = Object.entries(rules).find(([pattern]) => message.includes(pattern))?.[1] 
+      interval = Object.entries(rules).find(([pattern]) => message.includes(pattern))?.[1]
         ?? this.samplingConfig.defaultInterval;
     }
-    
+
     // Sample repetitive debug messages
     if (interval !== undefined && !this.shouldSample(message, interval)) {
       return;
     }
-    this.logger.debug(message, metadata);
+    
+    const enhancedMetadata = metadata ? { ...metadata } : {};
+    if (this.currentCorrelationId && !enhancedMetadata.correlationId) {
+      enhancedMetadata.correlationId = this.currentCorrelationId;
+    }
+    this.logger.debug(message, enhancedMetadata);
   }
 
   /**
@@ -509,4 +551,65 @@ export function createDurationTracker() {
     /** Get elapsed milliseconds since creation */
     elapsed: () => Date.now() - startTime
   };
+}
+
+/**
+ * Execute a function with a correlation ID set for all logs within its scope
+ * Useful for tracing related operations across multiple log calls
+ * 
+ * @param fn - Async function to execute with correlation ID context
+ * @returns Promise resolving to the function's result
+ * 
+ * @example
+ * ```typescript
+ * await withCorrelationId(async () => {
+ *   logger.info('Starting task', { task: taskId });
+ *   await executeTask(taskId);
+ *   logger.info('Task complete', { task: taskId });
+ * });
+ * ```
+ */
+export async function withCorrelationId<T>(fn: () => Promise<T>): Promise<T> {
+  const correlationId = createCorrelationId();
+  const loggerInstance = Logger.getInstance();
+  const previousCorrelationId = loggerInstance.getCorrelationId();
+  
+  try {
+    loggerInstance.setCorrelationId(correlationId);
+    return await fn();
+  } finally {
+    if (previousCorrelationId !== null) {
+      loggerInstance.setCorrelationId(previousCorrelationId);
+    } else {
+      loggerInstance.clearCorrelationId();
+    }
+  }
+}
+
+/**
+ * Add structured log level metadata for analysis
+ * Helps categorize logs by their criticality and actionability
+ */
+export interface LogSeverityLevel {
+  /** Human-readable severity name */
+  severity: 'critical' | 'error' | 'warning' | 'info' | 'debug';
+  /** Whether this log requires action */
+  actionable: boolean;
+  /** Suggested audience (dev, ops, user) */
+  audience: 'development' | 'operations' | 'user';
+}
+
+/**
+ * Get severity metadata for a log level
+ * @param level - The log level
+ * @returns Severity metadata for analysis
+ */
+export function getLogSeverity(level: LogLevel): LogSeverityLevel {
+  const severityMap: Record<LogLevel, LogSeverityLevel> = {
+    error: { severity: 'error', actionable: true, audience: 'operations' },
+    warn: { severity: 'warning', actionable: false, audience: 'operations' },
+    info: { severity: 'info', actionable: false, audience: 'user' },
+    debug: { severity: 'debug', actionable: false, audience: 'development' }
+  };
+  return severityMap[level];
 }

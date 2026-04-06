@@ -55,10 +55,10 @@ export class QwenAgent extends BaseAgent {
     this.workingDir = config.workingDirectory || process.cwd();
 
     if (!existsSync(this.workingDir)) {
-      logger.debug(`📁 Creating working directory`, { 
-        agent: this.name, 
-        workingDir: this.workingDir,
-        operation: 'agent.init'
+      logger.debug(`📁 Creating working directory`, {
+        agent: this.name,
+        operation: 'agent.init',
+        workingDir: this.workingDir
       });
       mkdirSync(this.workingDir, { recursive: true });
     }
@@ -87,20 +87,21 @@ export class QwenAgent extends BaseAgent {
       });
 
       checkProcess.on('close', (code: number | null) => {
-        logger.debug(`✅ Qwen Code CLI check complete`, {
+        logger.debug(`✅ Qwen CLI verified`, {
           agent: this.name,
-          exitCode: code,
-          operation: 'agent.init'
+          operation: 'agent.init',
+          exitCode: code
         });
         resolve();
       });
 
       checkProcess.on('error', (error: Error) => {
-        logger.error(`❌ Qwen Code CLI not found`, {
+        logger.error(`❌ Qwen CLI not found`, {
           agent: this.name,
           operation: 'agent.init',
           error,
-          path: this.qwenPath
+          path: this.qwenPath,
+          exitCode: null
         });
         reject(new Error(
           `Qwen Code CLI is not installed or not in PATH. ` +

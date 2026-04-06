@@ -381,10 +381,11 @@ export class LoopManager implements ILoopManager {
       } catch (agentError) {
         // Handle unexpected agent execution errors
         const agentErrorMessage = agentError instanceof Error ? agentError.message : String(agentError);
-        logger.error('❌ Unexpected agent execution error', {
+        logger.error('❌ Agent execution failed', {
           operation: 'task.execution',
           task: task.id,
           agent: task.assignedAgent,
+          description: task.description.slice(0, 80),
           error: agentError instanceof Error ? agentError : new Error(agentErrorMessage)
         });
 
@@ -417,19 +418,19 @@ export class LoopManager implements ILoopManager {
           const commitMsg = `chore(ai): ${task.description.slice(0, 72)}`;
           const gitResult = await gitCommitPush(commitMsg, this.config.workingDirectory);
           if (!gitResult.success) {
-            logger.warn(`⚠️ Git auto-commit failed`, {
+            logger.debug(`⚠️ Git auto-commit failed`, {
               operation: 'git.commit',
               task: task.id,
-              exitCode: gitResult.output.slice(0, 100)
+              exitCode: gitResult.output?.slice(0, 100)
             });
           }
         } catch (gitError) {
           // Log git errors but don't fail the task
           const gitErrorMessage = gitError instanceof Error ? gitError.message : String(gitError);
-          logger.warn(`⚠️ Git auto-commit encountered an error`, {
+          logger.debug(`⚠️ Git auto-commit error`, {
             operation: 'git.error',
             task: task.id,
-            error: gitErrorMessage
+            error: gitError instanceof Error ? gitError : new Error(gitErrorMessage)
           });
         }
       } else {
