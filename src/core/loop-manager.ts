@@ -1,7 +1,8 @@
-import { ILoopManager, LoopStats, LoopConfig, Task, TaskStatus, TaskPriority, AgentResult } from '../types.js';
+import { ILoopManager, LoopStats, LoopConfig, Task, TaskStatus, TaskPriority, AgentResult, HealthReport } from '../types.js';
 import { AgentOrchestrator } from './orchestrator.js';
 import { TaskQueue } from './task-queue.js';
 import { SelfTaskGenerator } from './self-task-generator.js';
+import { HealthChecker } from './health-checker.js';
 import { gitCommitPush } from './git-utils.js';
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,6 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 export class LoopManager implements ILoopManager {
   private orchestrator: AgentOrchestrator;
   private taskQueue: TaskQueue;
+  private healthChecker: HealthChecker;
   private selfTaskGenerator: SelfTaskGenerator | null = null;
   private config: LoopConfig;
 
@@ -33,10 +35,11 @@ export class LoopManager implements ILoopManager {
     this.config = config;
     this.orchestrator = new AgentOrchestrator();
     this.taskQueue = new TaskQueue();
+    this.healthChecker = new HealthChecker();
 
     if (config.enableSelfTaskGeneration) {
       this.selfTaskGenerator = new SelfTaskGenerator(config.workingDirectory);
-      logger.info('Self-task generation enabled');
+      logger.debug('Self-task generation enabled');
     }
   }
 
@@ -57,16 +60,15 @@ export class LoopManager implements ILoopManager {
     // Analyze project and generate initial tasks if self-task generation is enabled
     if (this.selfTaskGenerator) {
       try {
-        logger.info('Analyzing project and generating self-directed tasks...');
         const analysis = this.selfTaskGenerator.analyzeProject();
-        logger.info(`Project analysis: ${analysis.files.length} files, ${analysis.totalLines} lines, complexity: ${analysis.complexity}`);
+        logger.info(`Project analysis complete: ${analysis.files.length} files, ${analysis.totalLines} lines`);
 
         // Generate and enqueue initial tasks
         const tasks = this.selfTaskGenerator.generateTasks(analysis);
         for (const taskDesc of tasks) {
           this.addTask(taskDesc.description, taskDesc.priority, { category: taskDesc.category, selfGenerated: true });
         }
-        logger.info(`Generated ${tasks.length} self-directed tasks`);
+        logger.info(`Generated ${tasks.length} initial tasks`);
       } catch (error) {
         logger.error(`Failed to generate self-directed tasks: ${error instanceof Error ? error.message : String(error)}`);
         // Continue without self-task generation
@@ -78,12 +80,13 @@ export class LoopManager implements ILoopManager {
     this.startTime = new Date();
     this.loopIterationCount = 0;
 
-    logger.info(`Loop started with interval ${this.config.loopInterval}ms`);
-    if (this.config.maxLoopIterations && this.config.maxLoopIterations > 0) {
-      logger.info(`Max iterations: ${this.config.maxLoopIterations}`);
-    } else {
-      logger.info('Max iterations: unlimited (run until stopped)');
-    }
+    // Initialize health checker
+    this.updateHealthChecker();
+
+    const iterLimit = this.config.maxLoopIterations && this.config.maxLoopIterations > 0 
+      ? `${this.config.maxLoopIterations} iterations` 
+      : 'unlimited';
+    logger.info(`Loop started (interval: ${this.config.loopInterval}ms, limit: ${iterLimit})`);
 
     // Start the loop
     this.runLoop();
@@ -96,8 +99,6 @@ export class LoopManager implements ILoopManager {
     if (!this.isLoopRunning) {
       return;
     }
-
-    logger.info('Stopping Qwen Loop...');
 
     this.isLoopRunning = false;
     this.isLoopPaused = false;
@@ -122,7 +123,6 @@ export class LoopManager implements ILoopManager {
       return;
     }
 
-    logger.info('Pausing Qwen Loop...');
     this.isLoopPaused = true;
 
     if (this.loopInterval) {
@@ -130,7 +130,7 @@ export class LoopManager implements ILoopManager {
       this.loopInterval = null;
     }
 
-    logger.info('Loop paused');
+    logger.debug('Loop paused');
   }
 
   /**
@@ -141,8 +141,8 @@ export class LoopManager implements ILoopManager {
       return;
     }
 
-    logger.info('Resuming Qwen Loop...');
     this.isLoopPaused = false;
+    logger.debug('Loop resumed');
     this.runLoop();
   }
 
@@ -195,8 +195,11 @@ export class LoopManager implements ILoopManager {
     };
 
     this.taskQueue.enqueue(task);
-    logger.info(`Task added to queue: ${task.id} - ${description}`);
-    
+    logger.debug(`Task added: ${description.slice(0, 60)}${description.length > 60 ? '...' : ''}`, {
+      task: task.id,
+      priority
+    });
+
     return task;
   }
 
@@ -233,7 +236,8 @@ export class LoopManager implements ILoopManager {
       try {
         await this.processLoopIteration();
       } catch (error) {
-        logger.error(`Error in loop iteration: ${error}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`Error in loop iteration: ${errorMessage}`);
       }
     }, this.config.loopInterval);
 
@@ -241,7 +245,8 @@ export class LoopManager implements ILoopManager {
     try {
       await this.processLoopIteration();
     } catch (error) {
-      logger.error(`Error in initial loop iteration: ${error}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Error in initial loop iteration: ${errorMessage}`);
     }
   }
 
@@ -249,7 +254,7 @@ export class LoopManager implements ILoopManager {
     // Check if we've reached max concurrent tasks
     const runningTasks = this.taskQueue.getTasksByStatus(TaskStatus.RUNNING);
     if (runningTasks.length >= this.config.maxConcurrentTasks) {
-      logger.debug(`Max concurrent tasks reached (${this.config.maxConcurrentTasks}), waiting...`);
+      logger.debug(`Max concurrent tasks reached (${this.config.maxConcurrentTasks})`);
       return;
     }
 
@@ -262,7 +267,7 @@ export class LoopManager implements ILoopManager {
       task = this.selfTaskGenerator.getNextTask(analysis);
       if (task) {
         this.taskQueue.enqueue(task);
-        logger.info(`Self-generated new task: ${task.description.slice(0, 80)}...`);
+        logger.debug(`Self-generated task: ${task.description.slice(0, 60)}...`);
         task = this.taskQueue.dequeue(); // Re-dequeue the newly added task
       }
     }
@@ -275,7 +280,7 @@ export class LoopManager implements ILoopManager {
     // Check max iterations limit (count completed tasks)
     if (this.config.maxLoopIterations && this.config.maxLoopIterations > 0) {
       if (this.loopIterationCount >= this.config.maxLoopIterations) {
-        logger.info(`Reached max iterations (${this.config.maxLoopIterations}), stopping loop`);
+        logger.info(`Reached max iterations (${this.config.maxLoopIterations}), stopping`);
         await this.stop();
         return;
       }
@@ -301,21 +306,30 @@ export class LoopManager implements ILoopManager {
       if (result.success) {
         this.completedTasksCount++;
         this.totalExecutionTime += result.executionTime;
-        logger.info(`Task ${task.id} completed successfully in ${result.executionTime}ms`, {
-          task: task.id
+        logger.info(`Task completed: ${task.description.slice(0, 60)}${task.description.length > 60 ? '...' : ''}`, {
+          task: task.id,
+          duration: result.executionTime
         });
+
+        // Track in health checker
+        if (task.assignedAgent) {
+          this.healthChecker.trackTaskCompletion(task.assignedAgent, true, result.executionTime);
+        }
 
         // Auto commit and push after each task
         const commitMsg = `chore(ai): ${task.description.slice(0, 72)}`;
         const gitResult = await gitCommitPush(commitMsg, this.config.workingDirectory);
-        if (gitResult.success) {
-          logger.info(`Changes committed and pushed: ${commitMsg}`, { task: task.id });
-        } else {
-          logger.warn(`Git push failed: ${gitResult.output}`, { task: task.id });
+        if (!gitResult.success) {
+          logger.warn(`Git operation failed: ${gitResult.output}`, { task: task.id });
         }
       } else {
         this.failedTasksCount++;
         this.totalExecutionTime += result.executionTime;
+
+        // Track in health checker
+        if (task.assignedAgent) {
+          this.healthChecker.trackTaskCompletion(task.assignedAgent, false, result.executionTime);
+        }
 
         // Retry logic
         const retryCount = task.metadata?.retryCount || 0;
@@ -324,12 +338,13 @@ export class LoopManager implements ILoopManager {
           task.metadata.retryCount = retryCount + 1;
           task.status = TaskStatus.PENDING;
           this.taskQueue.enqueue(task);
-          logger.warn(`Task ${task.id} failed, retrying (${retryCount + 1}/${this.config.maxRetries})`, {
-            task: task.id
+          logger.warn(`Task failed, retrying (${retryCount + 1}/${this.config.maxRetries}): ${task.description.slice(0, 50)}...`, {
+            task: task.id,
+            retryCount: retryCount + 1
           });
         } else {
           this.loopIterationCount++; // Count failed retries too
-          logger.error(`Task ${task.id} failed after ${retryCount} retries: ${result.error}`, {
+          logger.error(`Task failed after ${retryCount} retries: ${result.error}`, {
             task: task.id
           });
         }
@@ -337,10 +352,56 @@ export class LoopManager implements ILoopManager {
     } catch (error) {
       this.failedTasksCount++;
       this.loopIterationCount++;
-      logger.error(`Unexpected error executing task ${task.id}: ${error}`, {
-        task: task.id
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Task execution error: ${errorMessage}`, {
+        task: task.id,
+        error
       });
+
+      // Track in health checker
+      if (task.assignedAgent) {
+        this.healthChecker.trackTaskCompletion(task.assignedAgent, false, 0);
+      }
     }
+  }
+
+  /**
+   * Update health checker with current state
+   */
+  private updateHealthChecker(): void {
+    const allTasks = this.taskQueue.getAllTasks();
+    this.healthChecker.updateAgents(this.orchestrator.getAllAgents());
+    this.healthChecker.updateLoopStats({
+      loopStartTime: this.startTime,
+      completedTasks: this.completedTasksCount,
+      failedTasks: this.failedTasksCount,
+      totalExecutionTime: this.totalExecutionTime,
+      maxConcurrentTasks: this.config.maxConcurrentTasks,
+      loopInterval: this.config.loopInterval,
+      maxRetries: this.config.maxRetries,
+      workingDirectory: this.config.workingDirectory
+    });
+    this.healthChecker.updateTaskQueue(allTasks.map(t => ({
+      id: t.id,
+      status: t.status,
+      priority: t.priority
+    })));
+  }
+
+  /**
+   * Get the health checker instance for generating health reports
+   */
+  getHealthChecker(): HealthChecker {
+    this.updateHealthChecker();
+    return this.healthChecker;
+  }
+
+  /**
+   * Get a comprehensive health report
+   */
+  getHealthReport(): HealthReport {
+    this.updateHealthChecker();
+    return this.healthChecker.getJsonReport();
   }
 
   getAgentStatusReport(): string {

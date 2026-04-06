@@ -29,12 +29,17 @@ export class SelfTaskGenerator {
   private completedTasks: string[] = [];
   private taskPool: TaskDescription[] = [];
 
+  /**
+   * Create a new SelfTaskGenerator
+   * @param workingDir - The working directory to analyze
+   */
   constructor(workingDir: string) {
     this.workingDir = workingDir;
   }
 
   /**
-   * Analyze project and generate a pool of potential tasks
+   * Analyze the project directory and gather metadata
+   * @returns Object containing project analysis including file count, types, and complexity
    */
   analyzeProject(): ProjectAnalysis {
     const analysis: ProjectAnalysis = {
@@ -80,6 +85,8 @@ export class SelfTaskGenerator {
 
   /**
    * Generate self-directed tasks based on project analysis
+   * @param analysis - The project analysis result
+   * @returns Array of task descriptions with priorities and categories
    */
   generateTasks(analysis: ProjectAnalysis): TaskDescription[] {
     const tasks: TaskDescription[] = [];
@@ -140,6 +147,8 @@ export class SelfTaskGenerator {
   /**
    * Get the next task from the pool, cycling through categories
    * Avoids repeating the same task too soon
+   * @param analysis - The project analysis result
+   * @returns A new Task object, or null if no tasks available
    */
   getNextTask(analysis: ProjectAnalysis): Task | null {
     if (this.taskPool.length === 0) {
@@ -189,7 +198,7 @@ export class SelfTaskGenerator {
   }
 
   /**
-   * Reset completed tasks (start fresh)
+   * Reset the completed tasks tracking to start fresh
    */
   resetCompleted(): void {
     this.completedTasks = [];

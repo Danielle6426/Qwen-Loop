@@ -6,7 +6,7 @@
     "qwen-loop": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npx tsc",
     "start": "tsx src/cli.ts",
     "dev": "tsx watch src/cli.ts",
     "test": "tsx --test src/__tests__/*.test.ts"
@@ -25,6 +25,7 @@
   "homepage": "https://github.com/tang-vu/Qwen-Loop#readme",
   "description": "",
   "dependencies": {
+    "@inquirer/prompts": "^8.3.2",
     "@types/node": "^25.5.2",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
@@ -34,7 +35,6 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "@types/uuid": "^10.0.0",
-    "@types/winston": "^2.4.4"
+    "@types/uuid": "^10.0.0"
   }
 }

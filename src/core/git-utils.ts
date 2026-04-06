@@ -23,11 +23,15 @@ function ensureYoloSettings(cwd: string): void {
   };
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-  logger.debug('Ensured .qwen/settings.json with YOLO mode', { cwd });
+  logger.debug('Ensured .qwen/settings.json with YOLO mode');
 }
 
 /**
- * Run a command and return stdout
+ * Run a command and return stdout/stderr
+ * @param cmd - The command to execute
+ * @param args - Command arguments
+ * @param cwd - Working directory for the command
+ * @returns Promise resolving to an object with stdout and stderr
  */
 function run(cmd: string, args: string[], cwd?: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -50,6 +54,9 @@ function run(cmd: string, args: string[], cwd?: string): Promise<{ stdout: strin
 
 /**
  * Run git add + commit + push after each task
+ * @param message - The commit message to use
+ * @param cwd - The working directory for git operations
+ * @returns Object indicating success/failure and output/error message
  */
 export async function gitCommitPush(
   message: string,
@@ -63,26 +70,24 @@ export async function gitCommitPush(
     const { stdout: statusOut } = await run('git', ['status', '--porcelain'], cwd);
 
     if (!statusOut.trim()) {
-      logger.info('No changes to commit');
+      logger.debug('No changes to commit');
       return { success: true, output: 'No changes to commit' };
     }
 
     // git add -A
     await run('git', ['add', '-A'], cwd);
-    logger.info('Staged all changes');
 
     // git commit
     await run('git', ['commit', '-m', message], cwd);
-    logger.info(`Committed: ${message}`);
+    logger.debug(`Committed: ${message.slice(0, 50)}...`);
 
     // git push
-    const pushResult = await run('git', ['push'], cwd);
-    logger.info('Pushed to remote');
+    await run('git', ['push'], cwd);
 
-    return { success: true, output: pushResult.stdout };
+    return { success: true, output: 'Changes committed and pushed' };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    logger.error(`Git commit/push failed: ${msg}`);
+    logger.error(`Git operation failed: ${msg}`);
     return { success: false, output: msg };
   }
 }

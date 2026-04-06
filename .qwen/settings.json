@@ -2,10 +2,7 @@
   "permissions": {
     "defaultMode": "yolo",
     "confirmShellCommands": false,
-    "confirmFileEdits": false,
-    "allow": [
-      "Bash(git commit *)"
-    ]
+    "confirmFileEdits": false
   },
   "$version": 3
 }

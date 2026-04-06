@@ -80,8 +80,11 @@ Press `Ctrl+C` to stop.
 | `npm start -- init` | Generate single-project config |
 | `npm start -- init-multi` | Generate multi-project config |
 | `npm start -- start` | Start the loop (auto-detects single/multi) |
+| `npm start -- start --health-port 3100` | Start with HTTP health check server |
 | `npm start -- validate` | Validate configuration |
 | `npm start -- config` | Show current configuration |
+| `npm start -- health` | Show system health status |
+| `npm start -- health --json` | Show health status in JSON format |
 
 ### Single-Project Config
 
@@ -196,6 +199,8 @@ This ensures Qwen Code **never asks for permission** — fully autonomous.
 
 ## 📊 Monitoring
 
+### Console Status
+
 Status prints every 30 seconds during loop execution:
 
 ```
@@ -216,6 +221,73 @@ By Status:
   RUNNING: 0
   COMPLETED: 2
   FAILED: 0
+```
+
+### Health Check CLI
+
+Get comprehensive system health status:
+
+```bash
+# Text format (human-readable)
+npm start -- health
+
+# JSON format (for automation/monitoring tools)
+npm start -- health --json
+```
+
+**Health report includes:**
+- 🤖 **Agent Health**: Status, task counts, failure rates per agent
+- 📊 **Task Throughput**: Completion rates, success/error rates, tasks per minute
+- 💻 **Resource Usage**: CPU, memory, heap usage, active processes
+- ⚙️ **Configuration**: Current settings summary
+- ⚠️ **Warnings/Errors**: Detected issues and anomalies
+
+### HTTP Health Endpoint (Optional)
+
+Start an HTTP server for monitoring integration:
+
+```bash
+npm start -- start --health-port 3100
+```
+
+**Endpoints:**
+
+| Endpoint | Description | Response |
+|----------|-------------|----------|
+| `GET /health` | Full health report (HTML or JSON based on Accept header) | HTML page or JSON |
+| `GET /health/json` | JSON health report | JSON object |
+| `GET /health/live` | Simple liveness check | `{"status": "alive"}` |
+| `GET /health/ready` | Readiness check (200 if ready, 503 if not) | JSON status |
+
+**Example usage:**
+
+```bash
+# Check if service is alive
+curl http://localhost:3100/health/live
+
+# Get full health report in JSON
+curl http://localhost:3100/health/json
+
+# View HTML dashboard in browser
+open http://localhost:3100/health
+```
+
+**JSON Response Structure:**
+
+```json
+{
+  "status": "healthy|degraded|unhealthy",
+  "timestamp": "2026-04-07T01:37:56.789Z",
+  "uptime": 123456,
+  "agents": [...],
+  "taskThroughput": {...},
+  "priorityBreakdown": {...},
+  "resources": {...},
+  "config": {...},
+  "summary": "...",
+  "warnings": [...],
+  "errors": [...]
+}
 ```
 
 ## 🔍 Troubleshooting

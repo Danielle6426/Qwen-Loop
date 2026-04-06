@@ -5,10 +5,18 @@ import { spawn } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
+/**
+ * Agent implementation that uses Qwen Code CLI to execute tasks.
+ * Spawns the `qwen` CLI process with task descriptions as prompts.
+ */
 export class QwenAgent extends BaseAgent {
   private qwenPath: string;
   private workingDir: string;
 
+  /**
+   * Create a new QwenAgent
+   * @param config - Agent configuration including optional model, timeout, and working directory
+   */
   constructor(config: AgentConfig) {
     super({
       ...config,
@@ -26,7 +34,7 @@ export class QwenAgent extends BaseAgent {
   }
 
   protected async onInitialize(): Promise<void> {
-    logger.info('Checking Qwen Code CLI installation...', { agent: this.name });
+    logger.debug('Verifying Qwen Code CLI availability', { agent: this.name });
 
     return new Promise((resolve, reject) => {
       const checkProcess = spawn(this.qwenPath, ['--version'], {
@@ -34,23 +42,13 @@ export class QwenAgent extends BaseAgent {
         shell: true
       });
 
-      let output = '';
-
-      checkProcess.stdout.on('data', (data: Buffer) => {
-        output += data.toString();
-      });
-
-      checkProcess.stderr.on('data', (data: Buffer) => {
-        output += data.toString();
-      });
-
       checkProcess.on('close', (code: number | null) => {
-        logger.info(`Qwen Code CLI is available (exit code: ${code})`, { agent: this.name });
+        logger.debug(`Qwen Code CLI check complete (exit: ${code})`, { agent: this.name });
         resolve();
       });
 
       checkProcess.on('error', (error: Error) => {
-        logger.error(`Qwen Code CLI not found: ${error.message}`, { agent: this.name });
+        logger.error(`Qwen Code CLI not found`, { agent: this.name, error });
         reject(new Error(`Qwen Code CLI is not installed or not in PATH. Install it first.`));
       });
     });
@@ -58,15 +56,15 @@ export class QwenAgent extends BaseAgent {
 
   protected async onExecuteTask(task: Task, signal: AbortSignal): Promise<AgentResult> {
     const startTime = Date.now();
-    
-    logger.info(`Executing Qwen task: ${task.description}`, { 
-      agent: this.name, 
-      task: task.id 
+
+    logger.info(`Executing task: ${task.description.slice(0, 60)}${task.description.length > 60 ? '...' : ''}`, {
+      agent: this.name,
+      task: task.id
     });
 
     // Build the command based on task description
     const args = this.buildCommandArgs(task);
-    
+
     return new Promise((resolve) => {
       const qwenProcess = spawn(this.qwenPath, args, {
         cwd: this.workingDir,
@@ -82,8 +80,12 @@ export class QwenAgent extends BaseAgent {
       qwenProcess.stdout.on('data', (data) => {
         const text = data.toString();
         output += text;
-        logger.debug(`Qwen output: ${text}`, { agent: this.name, task: task.id });
         
+        // Only log debug output for first 200 chars to avoid verbosity
+        if (text.length < 200) {
+          logger.debug(`Agent output: ${text}`, { agent: this.name, task: task.id });
+        }
+
         // Try to detect file operations from output
         this.parseFileOperations(text, filesModified, filesCreated);
       });
@@ -91,13 +93,16 @@ export class QwenAgent extends BaseAgent {
       qwenProcess.stderr.on('data', (data) => {
         const text = data.toString();
         errorOutput += text;
-        logger.warn(`Qwen stderr: ${text}`, { agent: this.name, task: task.id });
+        // Only log stderr if it's significant (not just warnings)
+        if (!text.includes('Warning') && !text.includes('warning')) {
+          logger.debug(`Agent stderr: ${text.slice(0, 100)}`, { agent: this.name, task: task.id });
+        }
       });
 
       // Handle abort signal
       if (signal) {
         signal.addEventListener('abort', () => {
-          logger.info('Task aborted by controller', { agent: this.name, task: task.id });
+          logger.info('Task aborted', { agent: this.name, task: task.id });
           qwenProcess.kill();
           resolve({
             success: false,
@@ -109,7 +114,7 @@ export class QwenAgent extends BaseAgent {
 
       qwenProcess.on('close', (code) => {
         const success = code === 0;
-        
+
         resolve({
           success,
           output: output || undefined,
@@ -123,7 +128,7 @@ export class QwenAgent extends BaseAgent {
       qwenProcess.on('error', (error) => {
         resolve({
           success: false,
-          error: `Failed to start Qwen process: ${error.message}`,
+          error: `Failed to start agent process: ${error.message}`,
           executionTime: Date.now() - startTime
         });
       });

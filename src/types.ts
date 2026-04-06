@@ -335,3 +335,121 @@ export interface LoopConfig {
   /** List of projects for multi-project mode (optional) */
   projects?: ProjectConfig[];
 }
+
+/**
+ * Health status for an individual agent
+ */
+export interface AgentHealthStatus {
+  /** Agent identifier */
+  id: string;
+  /** Agent name */
+  name: string;
+  /** Agent type */
+  type: AgentType;
+  /** Current status */
+  status: AgentStatus;
+  /** Whether the agent is healthy */
+  healthy: boolean;
+  /** Time since last task completed (ms), null if never completed */
+  timeSinceLastTask?: number;
+  /** Total tasks executed by this agent */
+  totalTasksExecuted: number;
+  /** Failed tasks count for this agent */
+  failedTasks: number;
+  /** Error message if unhealthy */
+  error?: string;
+}
+
+/**
+ * System resource usage metrics
+ */
+export interface ResourceUsage {
+  /** CPU usage percentage (0-100) */
+  cpuUsage: number;
+  /** Memory usage in bytes */
+  memoryUsage: number;
+  /** Memory usage percentage (0-100) */
+  memoryUsagePercent: number;
+  /** Total available memory in bytes */
+  memoryTotal: number;
+  /** Free memory in bytes */
+  memoryFree: number;
+  /** Node.js heap size in bytes */
+  heapSize: number;
+  /** Node.js heap used in bytes */
+  heapUsed: number;
+  /** Node.js heap limit in bytes */
+  heapLimit: number;
+  /** Uptime in milliseconds */
+  uptime: number;
+  /** Number of active child processes */
+  activeProcesses: number;
+}
+
+/**
+ * Task throughput metrics
+ */
+export interface TaskThroughput {
+  /** Total tasks processed */
+  totalTasks: number;
+  /** Successfully completed tasks */
+  completedTasks: number;
+  /** Failed tasks */
+  failedTasks: number;
+  /** Currently running tasks */
+  runningTasks: number;
+  /** Pending tasks in queue */
+  pendingTasks: number;
+  /** Tasks per minute (throughput rate) */
+  tasksPerMinute: number;
+  /** Average execution time in milliseconds */
+  averageExecutionTime: number;
+  /** Error rate percentage (0-100) */
+  errorRate: number;
+  /** Success rate percentage (0-100) */
+  successRate: number;
+}
+
+/**
+ * Priority breakdown metrics
+ */
+export interface PriorityBreakdown {
+  /** Tasks by priority level */
+  byPriority: Record<TaskPriority, number>;
+  /** Tasks by status */
+  byStatus: Record<TaskStatus, number>;
+}
+
+/**
+ * Overall system health report
+ */
+export interface HealthReport {
+  /** Overall system health status */
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  /** Timestamp of the health check */
+  timestamp: Date;
+  /** System uptime in milliseconds */
+  uptime: number;
+  /** Agent health details */
+  agents: AgentHealthStatus[];
+  /** Task throughput metrics */
+  taskThroughput: TaskThroughput;
+  /** Priority breakdown */
+  priorityBreakdown: PriorityBreakdown;
+  /** Resource usage metrics */
+  resources: ResourceUsage;
+  /** Configuration summary */
+  config: {
+    maxConcurrentTasks: number;
+    loopInterval: number;
+    maxRetries: number;
+    agentCount: number;
+    workingDirectory: string;
+  };
+  /** Health check summary message */
+  summary: string;
+  /** Any warnings or issues */
+  warnings: string[];
+  /** Critical errors */
+  errors: string[];
+}

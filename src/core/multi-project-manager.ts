@@ -1,4 +1,4 @@
-import { LoopConfig, LoopStats, ProjectConfig, AgentConfig, AgentType, TaskPriority } from '../types.js';
+import { LoopConfig, LoopStats, ProjectConfig, AgentConfig, AgentType, TaskPriority, HealthReport } from '../types.js';
 import { LoopManager } from './loop-manager.js';
 import { QwenAgent, CustomAgent } from '../agents/index.js';
 import { logger } from '../logger.js';
@@ -118,6 +118,73 @@ export class MultiProjectManager {
     }
 
     logger.info('All projects stopped');
+  }
+
+  /**
+   * Get combined health report across all projects
+   */
+  getHealthReport(): HealthReport {
+    // Combine stats from all projects into a single health report
+    // Use the first project's health checker as the base
+    const firstProject = this.projectManagers.get(this.projectNames[0]);
+    if (!firstProject) {
+      throw new Error('No projects initialized');
+    }
+
+    const baseReport = firstProject.getHealthReport();
+
+    // Aggregate agent information from all projects
+    const allAgents: any[] = [];
+    let totalCompleted = 0;
+    let totalFailed = 0;
+    let totalExecutionTime = 0;
+    const allTasks: any[] = [];
+
+    for (const name of this.projectNames) {
+      const manager = this.projectManagers.get(name);
+      if (!manager) continue;
+
+      const projectReport = manager.getHealthReport();
+      allAgents.push(...projectReport.agents);
+      totalCompleted += projectReport.taskThroughput.completedTasks;
+      totalFailed += projectReport.taskThroughput.failedTasks;
+      totalExecutionTime += projectReport.taskThroughput.averageExecutionTime * projectReport.taskThroughput.completedTasks;
+      
+      // Collect tasks
+      const allProjectTasks = manager.getTaskQueue().getAllTasks();
+      for (const task of allProjectTasks) {
+        allTasks.push({
+          id: task.id,
+          status: task.status,
+          priority: task.priority
+        });
+      }
+    }
+
+    // Update the base report with combined data
+    baseReport.agents = allAgents;
+    baseReport.taskThroughput.completedTasks = totalCompleted;
+    baseReport.taskThroughput.failedTasks = totalFailed;
+    baseReport.taskThroughput.totalTasks = totalCompleted + totalFailed;
+    baseReport.taskThroughput.averageExecutionTime = totalCompleted > 0 ? totalExecutionTime / totalCompleted : 0;
+    
+    const totalTasks = totalCompleted + totalFailed;
+    baseReport.taskThroughput.errorRate = totalTasks > 0 ? (totalFailed / totalTasks) * 100 : 0;
+    baseReport.taskThroughput.successRate = totalTasks > 0 ? (totalCompleted / totalTasks) * 100 : 100;
+
+    // Recalculate priority and status breakdown
+    const byPriority: any = { critical: 0, high: 0, medium: 0, low: 0 };
+    const byStatus: any = { pending: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };
+    
+    for (const task of allTasks) {
+      byPriority[task.priority] = (byPriority[task.priority] || 0) + 1;
+      byStatus[task.status] = (byStatus[task.status] || 0) + 1;
+    }
+
+    baseReport.priorityBreakdown = { byPriority, byStatus };
+    baseReport.config.agentCount = allAgents.length;
+
+    return baseReport;
   }
 
   /**
@@ -242,7 +309,9 @@ export class MultiProjectManager {
             await new Promise(resolve => setTimeout(resolve, 2000));
 
             // Start next project
-            await this.processCurrentProject();
+            await this.processCurrentProject().catch((error) => {
+              logger.error(`Error processing next project: ${error instanceof Error ? error.message : String(error)}`);
+            });
           }
         } catch (error) {
           logger.error(`Error checking project status: ${error instanceof Error ? error.message : String(error)}`);
@@ -252,16 +321,17 @@ export class MultiProjectManager {
       logger.error(`Failed to start project "${projectName}": ${error instanceof Error ? error.message : String(error)}`);
       // Move to next project even if this one failed
       this.currentIndex = (this.currentIndex + 1) % this.projectNames.length;
-      
+
       if (this.currentIndex === 0) {
         logger.info('\n🔄 Completed all projects, starting from beginning...');
       }
 
       // Small delay before next project
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Start next project
-      await this.processCurrentProject();
+      setTimeout(async () => {
+        await this.processCurrentProject().catch((error) => {
+          logger.error(`Error processing next project: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      }, 2000);
     }
   }
 }

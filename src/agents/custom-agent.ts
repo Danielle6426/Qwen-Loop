@@ -4,54 +4,49 @@ import { logger } from '../logger.js';
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
 
+/**
+ * Agent implementation that uses a custom CLI command to execute tasks.
+ * Spawns the specified command with task descriptions as arguments.
+ */
 export class CustomAgent extends BaseAgent {
   private command: string;
   private workingDir: string;
 
+  /**
+   * Create a new CustomAgent
+   * @param config - Agent configuration where name is the command to execute
+   */
   constructor(config: AgentConfig) {
     super({
       ...config,
       type: AgentType.CUSTOM
     });
-    
+
     // For custom agents, the config.name should be the command to execute
     this.command = config.name;
     this.workingDir = config.workingDirectory || process.cwd();
-    
+
     if (!existsSync(this.workingDir)) {
       mkdirSync(this.workingDir, { recursive: true });
     }
   }
 
   protected async onInitialize(): Promise<void> {
-    logger.info(`Checking custom agent command: ${this.command}`, { agent: this.name });
-    
+    logger.debug(`Verifying custom agent command: ${this.command}`, { agent: this.name });
+
     return new Promise((resolve) => {
       const checkProcess = spawn(this.command, ['--help'], {
         timeout: 10000,
         windowsHide: true
       });
 
-      let output = '';
-      let errorOutput = '';
-
-      checkProcess.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-
-      checkProcess.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-      });
-
       checkProcess.on('close', (code) => {
-        logger.info(`Custom agent ${this.name} initialized (help exit code: ${code})`, { 
-          agent: this.name 
-        });
+        logger.debug(`Command check complete (exit: ${code})`, { agent: this.name });
         resolve();
       });
 
       checkProcess.on('error', (error) => {
-        logger.warn(`Custom agent help check failed: ${error.message}`, { agent: this.name });
+        logger.warn(`Command verification failed: ${error.message}`, { agent: this.name });
         // Still resolve to allow execution
         resolve();
       });
@@ -60,15 +55,15 @@ export class CustomAgent extends BaseAgent {
 
   protected async onExecuteTask(task: Task, signal: AbortSignal): Promise<AgentResult> {
     const startTime = Date.now();
-    
-    logger.info(`Executing custom task: ${task.description}`, { 
-      agent: this.name, 
-      task: task.id 
+
+    logger.info(`Executing task: ${task.description.slice(0, 60)}${task.description.length > 60 ? '...' : ''}`, {
+      agent: this.name,
+      task: task.id
     });
 
     // Build the command
     const args = this.buildCommandArgs(task);
-    
+
     return new Promise((resolve) => {
       const childProcess = spawn(this.command, args, {
         cwd: this.workingDir,
@@ -84,19 +79,25 @@ export class CustomAgent extends BaseAgent {
       childProcess.stdout.on('data', (data: Buffer) => {
         const text = data.toString();
         output += text;
-        logger.debug(`${this.name} output: ${text}`, { agent: this.name, task: task.id });
+        // Only log debug output for first 200 chars to avoid verbosity
+        if (text.length < 200) {
+          logger.debug(`Agent output: ${text}`, { agent: this.name, task: task.id });
+        }
         this.parseFileOperations(text, filesModified, filesCreated);
       });
 
       childProcess.stderr.on('data', (data: Buffer) => {
         const text = data.toString();
         errorOutput += text;
-        logger.warn(`${this.name} stderr: ${text}`, { agent: this.name, task: task.id });
+        // Only log stderr if it's significant (not just warnings)
+        if (!text.includes('Warning') && !text.includes('warning')) {
+          logger.debug(`Agent stderr: ${text.slice(0, 100)}`, { agent: this.name, task: task.id });
+        }
       });
 
       if (signal) {
         signal.addEventListener('abort', () => {
-          logger.info('Task aborted by controller', { agent: this.name, task: task.id });
+          logger.info('Task aborted', { agent: this.name, task: task.id });
           childProcess.kill();
           resolve({
             success: false,
@@ -108,7 +109,7 @@ export class CustomAgent extends BaseAgent {
 
       childProcess.on('close', (code: number | null) => {
         const success = code === 0;
-        
+
         resolve({
           success,
           output: output || undefined,

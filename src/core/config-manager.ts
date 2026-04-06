@@ -1,6 +1,6 @@
 import { LoopConfig, AgentConfig, AgentType } from '../types.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { logger } from '../logger.js';
 import { statSync } from 'fs';
 
@@ -37,20 +37,21 @@ export class ConfigManager {
       try {
         const configData = readFileSync(this.configPath, 'utf-8');
         const config = JSON.parse(configData);
-        
-        logger.info(`Configuration loaded from ${this.configPath}`);
-        
+
+        logger.debug(`Configuration loaded from ${this.configPath}`);
+
         return {
           ...DEFAULT_CONFIG,
           ...config,
           agents: config.agents || []
         } as LoopConfig;
       } catch (error) {
-        logger.error(`Failed to load configuration: ${error}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`Failed to load configuration: ${errorMessage}`);
         return this.getDefaultConfig();
       }
     } else {
-      logger.info('No configuration file found, using defaults');
+      logger.debug('No configuration file found, using defaults');
       return this.getDefaultConfig();
     }
   }
@@ -74,16 +75,17 @@ export class ConfigManager {
    */
   saveConfig(): void {
     try {
-      const configDir = join(this.configPath, '..');
+      const configDir = dirname(this.configPath);
       if (!existsSync(configDir)) {
         mkdirSync(configDir, { recursive: true });
       }
 
       writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
-      logger.info(`Configuration saved to ${this.configPath}`);
+      logger.debug(`Configuration saved to ${this.configPath}`);
     } catch (error) {
-      logger.error(`Failed to save configuration: ${error}`);
-      throw error;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to save configuration: ${errorMessage}`);
+      throw new Error(`Failed to save configuration: ${errorMessage}`);
     }
   }
 
@@ -114,7 +116,7 @@ export class ConfigManager {
   addAgent(agentConfig: AgentConfig): void {
     this.config.agents.push(agentConfig);
     this.saveConfig();
-    logger.info(`Agent ${agentConfig.name} added to configuration`);
+    logger.debug(`Agent added to configuration: ${agentConfig.name}`);
   }
 
   /**
@@ -126,7 +128,7 @@ export class ConfigManager {
     if (index !== -1) {
       this.config.agents.splice(index, 1);
       this.saveConfig();
-      logger.info(`Agent ${agentName} removed from configuration`);
+      logger.debug(`Agent removed from configuration: ${agentName}`);
     }
   }
 
