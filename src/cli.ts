@@ -5,7 +5,7 @@ import { LoopManager } from './core/loop-manager.js';
 import { MultiProjectManager } from './core/multi-project-manager.js';
 import { ConfigManager } from './core/config-manager.js';
 import { QwenAgent, CustomAgent } from './agents/index.js';
-import { TaskPriority, AgentType, AgentConfig, ProjectConfig, LoopConfig, IAgent } from './types.js';
+import { TaskPriority, AgentType, AgentStatus, AgentConfig, ProjectConfig, LoopConfig, IAgent } from './types.js';
 import { logger, setLogLevel } from './logger.js';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
@@ -55,7 +55,7 @@ function getCommandSummary(): string {
 
   const commandGroups = [
     {
-      title: enableColors ? chalk.bold.cyan('Setup Commands:') : 'Setup Commands:',
+      title: enableColors ? chalk.bold.cyan('🔧 Setup Commands:') : '🔧 Setup Commands:',
       commands: [
         { name: 'init', desc: 'Create configuration file (single project)', alias: '' },
         { name: 'init-multi', desc: 'Create multi-project configuration file', alias: '' },
@@ -63,14 +63,14 @@ function getCommandSummary(): string {
       ]
     },
     {
-      title: enableColors ? chalk.bold.cyan('Execution Commands:') : 'Execution Commands:',
+      title: enableColors ? chalk.bold.cyan('▶ Execution Commands:') : '▶ Execution Commands:',
       commands: [
         { name: 'start', desc: 'Start the agent loop', alias: 'run' },
         { name: 'add-task', desc: 'Add a task to the queue', alias: 'add' },
       ]
     },
     {
-      title: enableColors ? chalk.bold.cyan('Information Commands:') : 'Information Commands:',
+      title: enableColors ? chalk.bold.cyan('ℹ Information Commands:') : 'ℹ Information Commands:',
       commands: [
         { name: 'status', desc: 'Show current status of agents and tasks', alias: 'st' },
         { name: 'health', desc: 'Show system health status', alias: '' },
@@ -80,12 +80,12 @@ function getCommandSummary(): string {
   ];
 
   const lines: string[] = [];
-  
+
   for (const group of commandGroups) {
     lines.push(`\n${group.title}`);
     for (const c of group.commands) {
       const cmdText = cmd(c.name.padEnd(12));
-      const aliasText = c.alias ? dim(` (${c.alias})`) : '';
+      const aliasText = c.alias ? dim(` [alias: ${c.alias}]`) : '';
       lines.push(`  ${cmdText} ${bold(c.desc)}${aliasText}`);
     }
   }
@@ -137,6 +137,7 @@ program
     const tips = enableColors ? chalk.bold('💡 Tips:') : '💡 Tips:';
     const resources = enableColors ? chalk.bold('📚 Resources:') : '📚 Resources:';
     const examples = enableColors ? chalk.bold('📖 Common Workflows:') : '📖 Common Workflows:';
+    const aliases = enableColors ? chalk.bold('🔗 Command Aliases:') : '🔗 Command Aliases:';
 
     return `
 ${getCommandSummary()}
@@ -152,6 +153,14 @@ ${tips}
   • Add ${cmd('--json')} to status/health/config for script-friendly output
   • Run ${cmd('qwen-loop <command> --help')} for command-specific help
   • Use ${cmd('--no-color')} to disable color output for scripts
+  • Tab completion available for most commands and options
+
+${aliases}
+  ${cmd('start')} = ${cmd('run')}          ${dim('Start the agent loop')}
+  ${cmd('add-task')} = ${cmd('add')}       ${dim('Add a task to queue')}
+  ${cmd('status')} = ${cmd('st')}          ${dim('Show current status')}
+  ${cmd('config')} = ${cmd('cfg')}         ${dim('Show configuration')}
+  ${cmd('validate')} = ${cmd('val')}       ${dim('Validate config')}
 
 ${resources}
   Documentation  ${cyan('https://github.com/tang-vu/Qwen-Loop#readme')}
@@ -197,6 +206,42 @@ function displayError(message: string, suggestion?: string | string[]): void {
 }
 
 /**
+ * Helper: Display context-aware error based on error message patterns
+ */
+function displayContextualError(message: string, context?: string, ...additionalSuggestions: string[]): void {
+  const suggestions: string[] = [];
+  
+  // Add context-specific suggestions
+  if (context === 'config' || message.includes('config')) {
+    suggestions.push('Run "qwen-loop validate" to check your configuration');
+    suggestions.push('Use "qwen-loop init" to create a fresh configuration');
+  }
+  
+  if (context === 'file' || message.includes('ENOENT') || message.includes('not found')) {
+    suggestions.push('Ensure all referenced files and directories exist');
+    suggestions.push('Check working directory paths in your configuration');
+  }
+  
+  if (context === 'permission' || message.includes('EPERM') || message.includes('EACCES')) {
+    suggestions.push('Check file permissions for the config file and working directory');
+    suggestions.push('Run with appropriate privileges');
+  }
+  
+  if (context === 'network' || message.includes('EADDRINUSE')) {
+    suggestions.push('Use a different port or stop the process using the current port');
+    suggestions.push('Check for other running instances of Qwen Loop');
+  }
+
+  // Add any additional custom suggestions
+  suggestions.push(...additionalSuggestions);
+  
+  // Always include help resources
+  suggestions.push('Run "qwen-loop --help" for usage information');
+
+  displayError(message, suggestions);
+}
+
+/**
  * Helper: Display success message
  */
 function displaySuccess(message: string): void {
@@ -231,18 +276,137 @@ function displayInfo(message: string): void {
 }
 
 /**
+ * Helper: Calculate Levenshtein distance for fuzzy matching
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const m = str1.length;
+  const n = str2.length;
+  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (str1[i - 1] === str2[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+  }
+
+  return dp[m][n];
+}
+
+/**
+ * Helper: Suggest correct command if user made a typo
+ */
+function suggestCommand(typed: string): string | null {
+  const validCommands = ['init', 'init-multi', 'start', 'run', 'add-task', 'add', 'status', 'st', 'health', 'config', 'cfg', 'validate', 'val'];
+  
+  let bestMatch: string | null = null;
+  let bestDistance = Infinity;
+  const threshold = 3; // Only suggest if distance is small enough
+
+  for (const cmd of validCommands) {
+    const distance = levenshteinDistance(typed.toLowerCase(), cmd.toLowerCase());
+    if (distance < bestDistance && distance <= threshold) {
+      bestDistance = distance;
+      bestMatch = cmd;
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Helper: Suggest correct option if user made a typo
+ */
+function suggestOption(typed: string, validOptions: string[]): string | null {
+  let bestMatch: string | null = null;
+  let bestDistance = Infinity;
+  const threshold = 2;
+
+  for (const option of validOptions) {
+    const distance = levenshteinDistance(typed.toLowerCase(), option.toLowerCase());
+    if (distance < bestDistance && distance <= threshold) {
+      bestDistance = distance;
+      bestMatch = option;
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Helper: Auto-detect configuration file with fallback search
+ */
+function autoDetectConfigFile(preferredPath?: string): string | null {
+  // If preferred path exists, use it
+  if (preferredPath && existsSync(preferredPath)) {
+    return preferredPath;
+  }
+  
+  // Search common config file locations
+  const searchPaths = [
+    'qwen-loop.config.json',
+    'qwen-loop.config.js',
+    'qwen-loop.json',
+    '.qwen-loop.json',
+    'config.json',
+  ];
+  
+  // Check in current working directory
+  for (const filename of searchPaths) {
+    const fullPath = join(process.cwd(), filename);
+    if (existsSync(fullPath)) {
+      return fullPath;
+    }
+  }
+  
+  // Check in parent directories (up to 3 levels)
+  let currentDir = process.cwd();
+  for (let level = 0; level < 3; level++) {
+    const parentDir = join(currentDir, '..');
+    if (parentDir === currentDir) break; // Reached root
+    
+    for (const filename of searchPaths) {
+      const fullPath = join(parentDir, filename);
+      if (existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+    
+    currentDir = parentDir;
+  }
+  
+  return null;
+}
+
+/**
  * Helper: Check if config file exists, display helpful error if not
  */
 function requireConfig(configManager: ConfigManager): void {
   if (!configManager.isConfigLoadedFromFile()) {
-    const configPath = configManager['configPath'];
+    // Try auto-detection
+    const detectedPath = autoDetectConfigFile();
+    
+    const suggestions = detectedPath
+      ? [
+          `Auto-detected config file at: ${chalk.cyan(detectedPath)}`,
+          `Use detected config: qwen-loop start --config ${detectedPath}`,
+          `Or create a new one: qwen-loop init`,
+        ]
+      : [
+          `Run 'qwen-loop init' to create a new configuration file`,
+          `Use 'qwen-loop init --interactive' for guided setup`,
+          `Or specify a custom path with 'qwen-loop -c <path>'`,
+        ];
+    
     displayError(
-      `Configuration file not found at "${configPath}"`,
-      [
-        `Run 'qwen-loop init' to create a new configuration file`,
-        `Use 'qwen-loop init --interactive' for guided setup`,
-        `Or specify a custom path with 'qwen-loop -c <path>'`,
-      ]
+      `Configuration file not found`,
+      suggestions
     );
     process.exit(1);
   }
@@ -696,6 +860,7 @@ program
   .option('-c, --config <path>', 'Path to configuration file (default: ./qwen-loop.config.json)')
   .option('--auto-start', 'Automatically start processing tasks')
   .option('--health-port <port>', 'Enable HTTP health check server on specified port', parseInt)
+  .option('--interactive', 'Use interactive mode to configure startup options')
   .addHelpText('after', () => {
     const examples = getCommandExamples('start');
     return enableColors
@@ -704,6 +869,48 @@ program
   })
   .action(async (opts) => {
     try {
+      // Interactive mode: prompt for startup options
+      if (opts.interactive) {
+        console.log(enableColors
+          ? `\n${chalk.bold.cyan('🚀 Qwen Loop Interactive Startup')}`
+          : `\n🚀 Qwen Loop Interactive Startup`);
+        console.log(enableColors
+          ? chalk.dim('Configure and start the agent loop\n')
+          : 'Configure and start the agent loop\n');
+
+        // Ask for config file path
+        const configPath = await input({
+          message: enableColors ? chalk.white('Configuration file path (press Enter for default):') : 'Configuration file path (press Enter for default):',
+          default: '',
+        });
+
+        // Ask if they want to enable health check
+        const enableHealth = await confirm({
+          message: enableColors ? chalk.white('Enable health check server?') : 'Enable health check server?',
+          default: false
+        });
+
+        let healthPort = opts.healthPort;
+        if (enableHealth) {
+          const healthPortStr = await input({
+            message: enableColors ? chalk.white('Health check port (default: 3100):') : 'Health check port (default: 3100):',
+            default: '3100',
+            validate: (value) => {
+              const port = parseInt(value);
+              if (isNaN(port) || port < 1024 || port > 65535) {
+                return 'Please enter a valid port number (1024-65535)';
+              }
+              return true;
+            }
+          });
+          healthPort = parseInt(healthPortStr);
+        }
+
+        // Update opts for downstream logic
+        opts.config = configPath || undefined;
+        opts.healthPort = healthPort;
+      }
+
       const configManager = new ConfigManager(opts.config);
 
       // Check if config file was loaded or using defaults
@@ -1047,12 +1254,24 @@ program
         };
 
         if (!priorityMap[priorityKey]) {
+          // Try to suggest correct priority
+          const validPriorities = ['low', 'medium', 'high', 'critical'];
+          const suggestion = suggestOption(opts.priority, validPriorities);
+          
+          const suggestions = suggestion
+            ? [
+                `Did you mean: "${suggestion}"?`,
+                `Valid priorities are: low, medium, high, critical`,
+                `Example: qwen-loop add-task "Fix bug" --priority ${suggestion}`,
+              ]
+            : [
+                `Valid priorities are: low, medium, high, critical`,
+                `Example: qwen-loop add-task "Fix bug" --priority high`,
+              ];
+          
           displayError(
             `Invalid priority: "${opts.priority}"`,
-            [
-              `Valid priorities are: low, medium, high, critical`,
-              `Example: qwen-loop add-task "Fix bug" --priority high`,
-            ]
+            suggestions
           );
           process.exit(1);
         }
@@ -1154,6 +1373,8 @@ program
   .alias('st')
   .option('-c, --config <path>', 'Path to configuration file')
   .option('--json', 'Output in JSON format')
+  .option('--live', 'Try to fetch live status from running instance')
+  .option('--health-port <port>', 'Health server port for live status (default: 3100)', '3100')
   .addHelpText('after', () => {
     const examples = getCommandExamples('status');
     return enableColors
@@ -1178,6 +1399,31 @@ program
 
       const config = configManager.getConfig();
 
+      // Try to fetch live status if requested
+      let liveData = null;
+      if (opts.live || opts.healthPort) {
+        try {
+          const port = parseInt(opts.healthPort, 10);
+          const { isHealthServerAvailable, fetchHealthReport } = await import('./utils/health-client.js');
+          const serverAvailable = await isHealthServerAvailable('localhost', port);
+          
+          if (serverAvailable) {
+            liveData = await fetchHealthReport({ host: 'localhost', port });
+          } else if (opts.live) {
+            displayWarning(
+              'Could not connect to running instance',
+              [
+                `Make sure Qwen Loop is running with --health-port ${port}`,
+                `Example: qwen-loop start --health-port ${port}`,
+              ]
+            );
+          }
+        } catch (err) {
+          // Silently ignore live data errors, fall back to static status
+          liveData = null;
+        }
+      }
+
       if (opts.json) {
         // JSON output
         const statusData = {
@@ -1195,6 +1441,14 @@ program
             name: p.name,
             workingDirectory: p.workingDirectory,
           })) || [],
+          live: liveData ? {
+            connected: true,
+            port: opts.healthPort,
+            agents: liveData.agents || [],
+            taskThroughput: liveData.taskThroughput || {},
+          } : {
+            connected: false,
+          },
         };
         console.log(JSON.stringify(statusData, null, 2));
         return;
@@ -1202,6 +1456,45 @@ program
 
       console.log(enableColors ? `\n${chalk.bold.cyan('📊 Qwen Loop Status')}` : '\n📊 Qwen Loop Status');
       console.log(enableColors ? chalk.gray('═'.repeat(70)) : '═'.repeat(70));
+
+      // Show live status if available
+      if (liveData) {
+        console.log(enableColors ? chalk.bold.green('\n● Live Status (connected)') : '\n● Live Status (connected)');
+        console.log(enableColors ? chalk.gray('─'.repeat(70)) : '─'.repeat(70));
+        
+        if (liveData.agents && liveData.agents.length > 0) {
+          console.log(enableColors ? chalk.bold.cyan('\n🤖 Active Agents:') : '\n🤖 Active Agents:');
+          for (const agent of liveData.agents) {
+            const statusIcon = agent.status === AgentStatus.BUSY
+              ? (enableColors ? chalk.green('✓') : '✓')
+              : agent.status === AgentStatus.IDLE
+              ? (enableColors ? chalk.yellow('○') : '○')
+              : (enableColors ? chalk.red('✗') : '✗');
+            
+            console.log(`  ${statusIcon} ${enableColors ? chalk.cyan(agent.name) : agent.name} (${enableColors ? chalk.yellow(agent.type) : agent.type})`);
+            console.log(`    ${enableColors ? chalk.dim('Status:') : 'Status:'} ${agent.status}`);
+            console.log(`    ${enableColors ? chalk.dim('Healthy:') : 'Healthy:'} ${agent.healthy ? (enableColors ? chalk.green('yes') : 'yes') : (enableColors ? chalk.red('no') : 'no')}`);
+            console.log(`    ${enableColors ? chalk.dim('Tasks Executed:') : 'Tasks Executed:'} ${agent.totalTasksExecuted}`);
+            if (agent.failedTasks > 0) {
+              console.log(`    ${enableColors ? chalk.dim('Failed Tasks:') : 'Failed Tasks:'} ${agent.failedTasks}`);
+            }
+            if (agent.error) {
+              console.log(`    ${enableColors ? chalk.dim('Error:') : 'Error:'} ${agent.error}`);
+            }
+          }
+        }
+        
+        if (liveData.taskThroughput) {
+          console.log(enableColors ? chalk.bold.cyan('\n📋 Task Metrics:') : '\n📋 Task Metrics:');
+          console.log(`  ${enableColors ? chalk.bold('Completed:') : 'Completed:'} ${liveData.taskThroughput.completedTasks}`);
+          console.log(`  ${enableColors ? chalk.bold('Failed:') : 'Failed:'} ${liveData.taskThroughput.failedTasks}`);
+          if (liveData.taskThroughput.averageExecutionTime > 0) {
+            console.log(`  ${enableColors ? chalk.bold('Avg Execution Time:') : 'Avg Execution Time:'} ${liveData.taskThroughput.averageExecutionTime.toFixed(0)}ms`);
+          }
+        }
+        
+        console.log(enableColors ? chalk.gray('\n─'.repeat(70)) : '\n─'.repeat(70));
+      }
 
       // Show configuration summary
       console.log(enableColors ? chalk.bold.cyan('\n⚙ Configuration:') : '\n⚙ Configuration:');
@@ -1547,6 +1840,51 @@ program
 
 // Export for programmatic use
 export { LoopManager, MultiProjectManager, ConfigManager, QwenAgent, CustomAgent };
+
+// Add command-not-found handler with suggestions
+program.exitOverride();
+program.configureHelp({
+  styleTitle: (str) => enableColors ? chalk.bold.underline(str) : str,
+  styleCommandText: (str) => enableColors ? chalk.yellow(str) : str,
+  styleCommandDescription: (str) => enableColors ? chalk.green(str) : str,
+  styleOptionText: (str) => enableColors ? chalk.cyan(str) : str,
+  styleDescriptionText: (str) => enableColors ? chalk.white(str) : str,
+  styleArgumentText: (str) => enableColors ? chalk.yellow(str) : str,
+  showGlobalOptions: true,
+});
+
+// Override the error handler for unknown commands
+program.on('command:*', () => {
+  const args = process.argv.slice(2);
+  const typedCmd = args.find(arg => !arg.startsWith('-') && arg !== '--help' && arg !== '-h' && arg !== '--version' && arg !== '-V');
+  
+  if (typedCmd) {
+    const suggestion = suggestCommand(typedCmd);
+    if (suggestion) {
+      displayError(
+        `Unknown command: "${typedCmd}"`,
+        [
+          `Did you mean: ${chalk.yellow(suggestion)}?`,
+          `Run 'qwen-loop --help' to see available commands`,
+        ]
+      );
+    } else {
+      displayError(
+        `Unknown command: "${typedCmd}"`,
+        [
+          `Run 'qwen-loop --help' to see available commands`,
+          `Common commands: init, start, add-task, status, validate`,
+        ]
+      );
+    }
+  } else {
+    displayError(
+      'No command specified',
+      'Run "qwen-loop --help" to see available commands'
+    );
+  }
+  process.exit(1);
+});
 
 // Parse CLI arguments
 program.parse(process.argv);
