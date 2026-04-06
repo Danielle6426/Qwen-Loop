@@ -179,7 +179,10 @@ export class MultiProjectManager {
 
     for (const name of this.projectNames) {
       const manager = this.projectManagers.get(name);
-      if (!manager) continue;
+      if (!manager) {
+        logger.warn(`Project manager not found for "${name}" during health report generation`);
+        continue;
+      }
 
       const projectReport = manager.getHealthReport();
       allAgents.push(...projectReport.agents);
@@ -219,12 +222,36 @@ export class MultiProjectManager {
     };
 
     for (const task of allTasks) {
-      byPriority[task.priority] = (byPriority[task.priority] || 0) + 1;
-      byStatus[task.status] = (byStatus[task.status] || 0) + 1;
+      const priorityKey = task.priority as TaskPriority;
+      const statusKey = task.status as TaskStatus;
+      byPriority[priorityKey] = (byPriority[priorityKey] || 0) + 1;
+      byStatus[statusKey] = (byStatus[statusKey] || 0) + 1;
     }
 
     baseReport.priorityBreakdown = { byPriority, byStatus };
     baseReport.config.agentCount = allAgents.length;
+
+    // Update warnings and errors from all projects
+    const allWarnings: string[] = [];
+    const allErrors: string[] = [];
+    for (const name of this.projectNames) {
+      const manager = this.projectManagers.get(name);
+      if (!manager) continue;
+      const projectReport = manager.getHealthReport();
+      allWarnings.push(...projectReport.warnings);
+      allErrors.push(...projectReport.errors);
+    }
+    baseReport.warnings = allWarnings;
+    baseReport.errors = allErrors;
+
+    // Recalculate overall status based on aggregated data
+    if (allErrors.length > 0) {
+      baseReport.status = 'unhealthy';
+    } else if (allWarnings.length > 0 || allAgents.some(a => !a.healthy)) {
+      baseReport.status = 'degraded';
+    } else {
+      baseReport.status = 'healthy';
+    }
 
     return baseReport;
   }
@@ -309,6 +336,10 @@ export class MultiProjectManager {
   // Private methods
 
   private buildProjectConfig(projectConfig: ProjectConfig): LoopConfig {
+    if (!projectConfig.workingDirectory) {
+      throw new Error(`Project "${projectConfig.name}" is missing a working directory.`);
+    }
+
     return {
       agents: projectConfig.agents || this.globalConfig.agents,
       maxConcurrentTasks: projectConfig.maxConcurrentTasks || this.globalConfig.maxConcurrentTasks,

@@ -189,7 +189,7 @@ export class LoopManager implements ILoopManager {
    * @param metadata - Optional metadata to attach to the task
    * @returns The created Task object
    */
-  addTask(description: string, priority: TaskPriority = TaskPriority.MEDIUM, metadata?: Record<string, any>): Task {
+  addTask(description: string, priority: TaskPriority = TaskPriority.MEDIUM, metadata?: Record<string, unknown>): Task {
     const task: Task = {
       id: uuidv4(),
       description,
@@ -356,7 +356,7 @@ export class LoopManager implements ILoopManager {
         }
 
         // Retry logic
-        const retryCount = task.metadata?.retryCount || 0;
+        const retryCount = (task.metadata?.retryCount as number) || 0;
         if (retryCount < this.config.maxRetries) {
           task.metadata = task.metadata || {};
           task.metadata.retryCount = retryCount + 1;
@@ -369,7 +369,6 @@ export class LoopManager implements ILoopManager {
             error: result.error?.slice(0, 100)
           });
         } else {
-          this.loopIterationCount++; // Count failed retries too
           logger.error(`Task failed after max retries`, {
             task: task.id,
             agent: task.assignedAgent,

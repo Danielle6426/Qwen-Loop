@@ -62,7 +62,7 @@ export interface Task {
   /** Error message if the task failed (optional) */
   error?: string;
   /** Additional metadata associated with the task (optional) */
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**

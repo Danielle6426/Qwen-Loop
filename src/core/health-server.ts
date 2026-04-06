@@ -202,7 +202,8 @@ export class HealthServer {
   private handleReadiness(res: ServerResponse): void {
     // Readiness check - is the system ready to accept tasks?
     const report = this.healthChecker.getJsonReport();
-    const isReady = report.status !== 'unhealthy' && report.agents.some(a => a.healthy);
+    const hasHealthyAgent = report.agents.length > 0 && report.agents.some(a => a.healthy);
+    const isReady = report.status !== 'unhealthy' && hasHealthyAgent;
 
     if (isReady) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -219,7 +220,8 @@ export class HealthServer {
         health: report.status,
         healthyAgents: report.agents.filter(a => a.healthy).length,
         totalAgents: report.agents.length,
-        errors: report.errors
+        errors: report.errors,
+        message: report.agents.length === 0 ? 'No agents configured or initialized yet' : undefined
       }));
     }
   }

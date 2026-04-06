@@ -158,6 +158,15 @@ export class ConfigManager {
     return this.config.agents;
   }
 
+  /**
+   * Generate an example configuration for single-project mode.
+   *
+   * Returns a pre-configured LoopConfig object with sensible defaults, including
+   * a Qwen agent, conservative task limits, and self-task generation enabled.
+   * Useful as a starting point for new users or for testing.
+   *
+   * @returns A JSON-formatted string representing an example LoopConfig object.
+   */
   generateExampleConfig(): string {
     const exampleConfig: LoopConfig = {
       agents: [
@@ -182,6 +191,15 @@ export class ConfigManager {
     return JSON.stringify(exampleConfig, null, 2);
   }
 
+  /**
+   * Generate an example configuration for multi-project mode.
+   *
+   * Returns a pre-configured LoopConfig object with a `projects` array containing
+   * two example projects. Useful for users who want to run the loop across
+   * multiple repositories or directories.
+   *
+   * @returns A JSON-formatted string representing an example multi-project LoopConfig.
+   */
   generateMultiProjectExampleConfig(): string {
     const exampleConfig: LoopConfig = {
       agents: [
@@ -216,6 +234,14 @@ export class ConfigManager {
     return JSON.stringify(exampleConfig, null, 2);
   }
 
+  /**
+   * Validate the current configuration and return a list of errors.
+   *
+   * Checks for required fields, valid ranges, and filesystem existence of directories.
+   * An empty array indicates a valid configuration.
+   *
+   * @returns An array of error message strings. Empty if configuration is valid.
+   */
   validateConfig(): string[] {
     const errors: string[] = [];
 
