@@ -12,7 +12,25 @@ import type { HealthReport } from '../types.js';
 let enableColors = true;
 
 /**
+ * Command options interface for health command
+ */
+interface HealthCommandOptions {
+  config?: string;
+  json?: boolean;
+  host?: string;
+  port?: string;
+  live?: boolean;
+  watch?: boolean;
+  watchInterval?: string;
+}
+
+/**
  * Register the enhanced health command with subcommands
+ * 
+ * Adds a 'health' command to the CLI program with support for multiple subcommands
+ * (agents, resources, throughput, summary) and various output options.
+ * 
+ * @param program - The Commander.js Command instance to register the health command with
  */
 export function registerHealthCommand(program: Command): void {
   program
@@ -30,12 +48,12 @@ export function registerHealthCommand(program: Command): void {
       const cmd = (text: string) => enableColors ? chalk.yellow(text) : text;
       const bold = (text: string) => enableColors ? chalk.bold(text) : text;
       const gray = (text: string) => enableColors ? chalk.gray(text) : text;
-      
+
       return enableColors
         ? `\n${chalk.bold('📝 Examples:')}\n  ${gray('# Full health report')} → ${cmd('qwen-loop health')}\n  ${gray('# Agent health only')} → ${cmd('qwen-loop health agents')}\n  ${gray('# Resource usage only')} → ${cmd('qwen-loop health resources')}\n  ${gray('# Task throughput')} → ${cmd('qwen-loop health throughput')}\n  ${gray('# Summary status')} → ${cmd('qwen-loop health summary')}\n  ${gray('# Live metrics')} → ${cmd('qwen-loop health --live')}\n  ${gray('# Watch mode')} → ${cmd('qwen-loop health --watch')}\n  ${gray('# JSON for scripts')} → ${cmd('qwen-loop health --json')}\n  ${gray('# Custom refresh')} → ${cmd('qwen-loop health --watch --watch-interval 10')}\n`
         : `\n📝 Examples:\n  # Full health report → qwen-loop health\n  # Agent health only → qwen-loop health agents\n  # Resource usage only → qwen-loop health resources\n  # Task throughput → qwen-loop health throughput\n  # Summary status → qwen-loop health summary\n  # Live metrics → qwen-loop health --live\n  # Watch mode → qwen-loop health --watch\n  # JSON for scripts → qwen-loop health --json\n  # Custom refresh → qwen-loop health --watch --watch-interval 10\n`;
     })
-    .action(async (subcommand: string | undefined, opts: any) => {
+    .action(async (subcommand: string | undefined, opts: HealthCommandOptions) => {
       try {
         // Validate subcommand
         const validSubcommands = ['agents', 'resources', 'throughput', 'summary', undefined];
@@ -49,7 +67,7 @@ export function registerHealthCommand(program: Command): void {
 
         // Watch mode
         if (opts.watch) {
-          const interval = parseInt(opts.watchInterval, 10) * 1000 || 5000;
+          const interval = parseInt(opts.watchInterval || '5', 10) * 1000 || 5000;
           console.log(enableColors ? chalk.yellow(`\n🔄 Watch mode enabled (refreshing every ${interval / 1000}s). Press Ctrl+C to stop.\n`) : `\n🔄 Watch mode enabled (refreshing every ${interval / 1000}s). Press Ctrl+C to stop.\n`);
           
           const watchHealth = async () => {
@@ -91,16 +109,25 @@ export function registerHealthCommand(program: Command): void {
 
 /**
  * Helper function to display health information
+ * 
+ * Fetches and displays system health metrics from either a live running instance
+ * or static configuration data. Supports multiple output formats including JSON
+ * and human-readable formatted text.
+ * 
+ * @param subcommand - Optional subcommand to display specific metrics (agents, resources, throughput, summary)
+ * @param opts - Command options including config path, output format, and connection settings
+ * @param showHeader - Whether to display the header section before the report
+ * @throws Error if health report generation fails
  */
 async function displayHealth(
   subcommand: string | undefined,
-  opts: any,
+  opts: HealthCommandOptions,
   showHeader: boolean
 ): Promise<void> {
   const { isHealthServerAvailable, fetchHealthReport } = await import('../utils/health-client.js');
   
   // Try to fetch from running instance if --live flag is set or if we can connect
-  const port = parseInt(opts.port, 10);
+  const port = parseInt(opts.port || '3100', 10);
   const serverAvailable = await isHealthServerAvailable(opts.host, port);
 
   let report: HealthReport;
@@ -198,11 +225,18 @@ async function displayHealth(
 
 /**
  * Display specific subcommand report
+ * 
+ * Renders a formatted output for a specific health metric subcommand.
+ * Supports both JSON and human-readable formats with colorized output.
+ * 
+ * @param subcommand - The metric type to display (agents, resources, throughput, summary)
+ * @param report - The health report data to display
+ * @param opts - Command options including JSON output flag
  */
 function displaySubcommandReport(
   subcommand: string,
   report: HealthReport,
-  opts: any
+  opts: HealthCommandOptions
 ): void {
   switch (subcommand) {
     case 'agents':
@@ -330,6 +364,12 @@ function displaySubcommandReport(
 
 /**
  * Format uptime milliseconds to human-readable string
+ * 
+ * Converts a duration in milliseconds to a human-readable format
+ * showing days, hours, minutes, and seconds as appropriate.
+ * 
+ * @param ms - Duration in milliseconds to format
+ * @returns Formatted string (e.g., "2d 5h", "3h 15m", "45m 30s", "120s")
  */
 function formatUptime(ms: number): string {
   const seconds = Math.floor(ms / 1000);

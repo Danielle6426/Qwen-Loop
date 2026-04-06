@@ -510,21 +510,21 @@ program
       ? `\n${chalk.bold('📝 Examples:')}\n  ${examples}\n`
       : `\n📝 Examples:\n  ${examples}\n`;
   })
-  .action(async (opts) => {
+  .action(async (opts: { interactive?: boolean; force?: boolean }) => {
     try {
       const configPath = join(process.cwd(), 'qwen-loop.config.json');
 
       // Check if config file already exists
       if (existsSync(configPath) && !opts.force) {
         const overwrite = await confirm({
-          message: enableColors 
+          message: enableColors
             ? chalk.yellow(`Configuration file already exists at ${configPath}. Overwrite?`)
             : `Configuration file already exists at ${configPath}. Overwrite?`,
           default: false
         });
 
         if (!overwrite) {
-          console.log(enableColors 
+          console.log(enableColors
             ? chalk.cyan('\nℹ Keeping existing configuration file.')
             : '\nℹ Keeping existing configuration file.');
           console.log(enableColors
@@ -693,7 +693,7 @@ program
       ? `\n${chalk.bold('📝 Examples:')}\n  ${examples}\n`
       : `\n📝 Examples:\n  ${examples}\n`;
   })
-  .action(async (opts) => {
+  .action(async (opts: { interactive?: boolean; force?: boolean }) => {
     try {
       const configPath = join(process.cwd(), 'qwen-loop.config.json');
 
@@ -872,9 +872,17 @@ program
       ? `\n${chalk.bold('📝 Examples:')}\n  ${examples}\n`
       : `\n📝 Examples:\n  ${examples}\n`;
   })
-  .action(async (opts) => {
+  .action(async (opts: {
+    config?: string;
+    autoStart?: boolean;
+    healthPort?: number;
+    interactive?: boolean;
+  }) => {
     try {
       // Interactive mode: prompt for startup options
+      let configPath = opts.config;
+      let healthPort = opts.healthPort;
+      
       if (opts.interactive) {
         console.log(enableColors
           ? `\n${chalk.bold.cyan('🚀 Qwen Loop Interactive Startup')}`
@@ -884,7 +892,7 @@ program
           : 'Configure and start the agent loop\n');
 
         // Ask for config file path
-        const configPath = await input({
+        const configPathInput = await input({
           message: enableColors ? chalk.white('Configuration file path (press Enter for default):') : 'Configuration file path (press Enter for default):',
           default: '',
         });
@@ -895,7 +903,6 @@ program
           default: false
         });
 
-        let healthPort = opts.healthPort;
         if (enableHealth) {
           const healthPortStr = await input({
             message: enableColors ? chalk.white('Health check port (default: 3100):') : 'Health check port (default: 3100):',
@@ -911,14 +918,13 @@ program
           healthPort = parseInt(healthPortStr);
         }
 
-        // Update opts for downstream logic
-        opts.config = configPath || undefined;
-        opts.healthPort = healthPort;
+        // Update for downstream logic
+        configPath = configPathInput || undefined;
       }
 
-      const configManager = new ConfigManager(opts.config);
+      const configManager = new ConfigManager(configPath);
 
-      // Check if config file was loaded or using defaults
+      // Check if config file was loaded or using defaults  
       if (!existsSync(configManager['configPath'])) {
         displayError(
           `Configuration file not found at "${configManager['configPath']}"`,
@@ -1386,7 +1392,12 @@ program
       ? `\n${chalk.bold('📝 Examples:')}\n  ${examples}\n`
       : `\n📝 Examples:\n  ${examples}\n`;
   })
-  .action(async (opts) => {
+  .action(async (opts: {
+    config?: string;
+    json?: boolean;
+    live?: boolean;
+    healthPort?: string;
+  }) => {
     try {
       const configManager = new ConfigManager(opts.config);
 
@@ -1408,7 +1419,7 @@ program
       let liveData = null;
       if (opts.live || opts.healthPort) {
         try {
-          const port = parseInt(opts.healthPort, 10);
+          const port = parseInt(opts.healthPort || '3100', 10);
           const { isHealthServerAvailable, fetchHealthReport } = await import('./utils/health-client.js');
           const serverAvailable = await isHealthServerAvailable('localhost', port);
           
@@ -1569,7 +1580,7 @@ program
       ? `\n${chalk.bold('📝 Examples:')}\n  ${examples}\n`
       : `\n📝 Examples:\n  ${examples}\n`;
   })
-  .action(async (opts) => {
+  .action(async (opts: { config?: string; json?: boolean }) => {
     try {
       const configManager = new ConfigManager(opts.config);
       const configPath = configManager['configPath'];
@@ -1653,7 +1664,7 @@ program
       ? `\n${chalk.bold('📝 Examples:')}\n  ${examples}\n`
       : `\n📝 Examples:\n  ${examples}\n`;
   })
-  .action(async (opts) => {
+  .action(async (opts: { config?: string; json?: boolean }) => {
     try {
       const configManager = new ConfigManager(opts.config);
       const configPath = configManager['configPath'];
