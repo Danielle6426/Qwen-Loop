@@ -112,6 +112,14 @@ export interface LoopStats {
   maxLoopIterations?: number;
 }
 
+export interface ProjectConfig {
+  name: string;
+  workingDirectory: string;
+  agents?: AgentConfig[]; // Override global agents for this project
+  maxConcurrentTasks?: number; // Override global setting
+  maxLoopIterations?: number; // Override global setting
+}
+
 export interface LoopConfig {
   agents: AgentConfig[];
   maxConcurrentTasks: number;
@@ -122,4 +130,5 @@ export interface LoopConfig {
   enableAutoStart: boolean;
   maxLoopIterations?: number; // Max number of loop iterations (0 = unlimited)
   enableSelfTaskGeneration?: boolean; // Auto-generate tasks by analyzing project
+  projects?: ProjectConfig[]; // Multi-project mode: list of projects to cycle through
 }

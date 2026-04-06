@@ -129,6 +129,40 @@ export class ConfigManager {
     return JSON.stringify(exampleConfig, null, 2);
   }
 
+  generateMultiProjectExampleConfig(): string {
+    const exampleConfig: LoopConfig = {
+      agents: [
+        {
+          name: 'qwen-dev',
+          type: AgentType.QWEN,
+          timeout: 120000
+        }
+      ],
+      maxConcurrentTasks: 1,
+      loopInterval: 5000,
+      maxRetries: 2,
+      workingDirectory: './',
+      logLevel: 'info',
+      enableAutoStart: false,
+      maxLoopIterations: 3,
+      enableSelfTaskGeneration: true,
+      projects: [
+        {
+          name: 'project-a',
+          workingDirectory: './project-a',
+          maxLoopIterations: 3
+        },
+        {
+          name: 'project-b',
+          workingDirectory: './project-b',
+          maxLoopIterations: 5
+        }
+      ]
+    };
+
+    return JSON.stringify(exampleConfig, null, 2);
+  }
+
   validateConfig(): string[] {
     const errors: string[] = [];
 

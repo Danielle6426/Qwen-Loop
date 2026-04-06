@@ -2,6 +2,7 @@
 
 // Main entry point for Qwen Loop
 import { LoopManager } from './core/loop-manager.js';
+import { MultiProjectManager } from './core/multi-project-manager.js';
 import { ConfigManager } from './core/config-manager.js';
 import { QwenAgent, CustomAgent } from './agents/index.js';
 import { TaskPriority, AgentType } from './types.js';
@@ -9,6 +10,7 @@ import { logger, setLogLevel } from './logger.js';
 
 export {
   LoopManager,
+  MultiProjectManager,
   ConfigManager,
   QwenAgent,
   CustomAgent,
