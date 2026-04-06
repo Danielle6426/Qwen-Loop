@@ -133,8 +133,9 @@ export class QwenAgent extends BaseAgent {
   private buildCommandArgs(task: Task): string[] {
     const args: string[] = [];
 
-    // Use -p flag for non-interactive mode (official approach per Qwen docs)
-    args.push('-p', task.description);
+    // Use positional prompt (Qwen CLI default behavior)
+    // Format: qwen "prompt" --yolo -o text
+    args.push(task.description);
 
     // Add yolo mode for auto-approval
     args.push('--yolo');

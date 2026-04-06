@@ -1,14 +1,16 @@
 import { ILoopManager, LoopStats, LoopConfig, Task, TaskStatus, TaskPriority, AgentResult } from '../types.js';
 import { AgentOrchestrator } from './orchestrator.js';
 import { TaskQueue } from './task-queue.js';
+import { SelfTaskGenerator } from './self-task-generator.js';
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export class LoopManager implements ILoopManager {
   private orchestrator: AgentOrchestrator;
   private taskQueue: TaskQueue;
+  private selfTaskGenerator: SelfTaskGenerator | null = null;
   private config: LoopConfig;
-  
+
   private isLoopRunning = false;
   private isLoopPaused = false;
   private loopInterval: NodeJS.Timeout | null = null;
@@ -16,11 +18,17 @@ export class LoopManager implements ILoopManager {
   private completedTasksCount = 0;
   private failedTasksCount = 0;
   private totalExecutionTime = 0;
+  private loopIterationCount = 0;
 
   constructor(config: LoopConfig) {
     this.config = config;
     this.orchestrator = new AgentOrchestrator();
     this.taskQueue = new TaskQueue();
+
+    if (config.enableSelfTaskGeneration) {
+      this.selfTaskGenerator = new SelfTaskGenerator(config.workingDirectory);
+      logger.info('Self-task generation enabled');
+    }
   }
 
   async start(): Promise<void> {
@@ -30,16 +38,36 @@ export class LoopManager implements ILoopManager {
     }
 
     logger.info('Starting Qwen Loop...');
-    
+
     // Initialize all agents
     await this.orchestrator.initializeAll();
-    
+
+    // Analyze project and generate initial tasks if self-task generation is enabled
+    if (this.selfTaskGenerator) {
+      logger.info('Analyzing project and generating self-directed tasks...');
+      const analysis = this.selfTaskGenerator.analyzeProject();
+      logger.info(`Project analysis: ${analysis.files.length} files, ${analysis.totalLines} lines, complexity: ${analysis.complexity}`);
+
+      // Generate and enqueue initial tasks
+      const tasks = this.selfTaskGenerator.generateTasks(analysis);
+      for (const taskDesc of tasks) {
+        this.addTask(taskDesc.description, taskDesc.priority, { category: taskDesc.category, selfGenerated: true });
+      }
+      logger.info(`Generated ${tasks.length} self-directed tasks`);
+    }
+
     this.isLoopRunning = true;
     this.isLoopPaused = false;
     this.startTime = new Date();
-    
+    this.loopIterationCount = 0;
+
     logger.info(`Loop started with interval ${this.config.loopInterval}ms`);
-    
+    if (this.config.maxLoopIterations && this.config.maxLoopIterations > 0) {
+      logger.info(`Max iterations: ${this.config.maxLoopIterations}`);
+    } else {
+      logger.info('Max iterations: unlimited (run until stopped)');
+    }
+
     // Start the loop
     this.runLoop();
   }
@@ -97,8 +125,8 @@ export class LoopManager implements ILoopManager {
 
   getStats(): LoopStats {
     const uptime = this.startTime ? Date.now() - this.startTime.getTime() : 0;
-    const averageExecutionTime = this.completedTasksCount > 0 
-      ? this.totalExecutionTime / this.completedTasksCount 
+    const averageExecutionTime = this.completedTasksCount > 0
+      ? this.totalExecutionTime / this.completedTasksCount
       : 0;
 
     return {
@@ -108,7 +136,9 @@ export class LoopManager implements ILoopManager {
       runningTasks: this.taskQueue.getTasksByStatus(TaskStatus.RUNNING).length,
       activeAgents: this.orchestrator.getAvailableAgents().length,
       uptime,
-      averageExecutionTime
+      averageExecutionTime,
+      loopIterations: this.loopIterationCount,
+      maxLoopIterations: this.config.maxLoopIterations || 0
     };
   }
 
@@ -170,10 +200,31 @@ export class LoopManager implements ILoopManager {
     }
 
     // Dequeue next task
-    const task = this.taskQueue.dequeue();
+    let task = this.taskQueue.dequeue();
+
+    // If queue is empty and self-task generation is enabled, generate more tasks
+    if (!task && this.selfTaskGenerator) {
+      const analysis = this.selfTaskGenerator.analyzeProject();
+      task = this.selfTaskGenerator.getNextTask(analysis);
+      if (task) {
+        this.taskQueue.enqueue(task);
+        logger.info(`Self-generated new task: ${task.description.slice(0, 80)}...`);
+        task = this.taskQueue.dequeue(); // Re-dequeue the newly added task
+      }
+    }
+
     if (!task) {
       logger.debug('No tasks in queue');
       return;
+    }
+
+    // Check max iterations limit (count completed tasks)
+    if (this.config.maxLoopIterations && this.config.maxLoopIterations > 0) {
+      if (this.loopIterationCount >= this.config.maxLoopIterations) {
+        logger.info(`Reached max iterations (${this.config.maxLoopIterations}), stopping loop`);
+        await this.stop();
+        return;
+      }
     }
 
     // Assign task to an available agent
@@ -186,20 +237,23 @@ export class LoopManager implements ILoopManager {
 
     // Execute the task
     task.status = TaskStatus.RUNNING;
-    
+
     try {
       const result = await agent.executeTask(task);
-      
+
+      // Count iteration after task completes
+      this.loopIterationCount++;
+
       if (result.success) {
         this.completedTasksCount++;
         this.totalExecutionTime += result.executionTime;
-        logger.info(`Task ${task.id} completed successfully in ${result.executionTime}ms`, { 
-          task: task.id 
+        logger.info(`Task ${task.id} completed successfully in ${result.executionTime}ms`, {
+          task: task.id
         });
       } else {
         this.failedTasksCount++;
         this.totalExecutionTime += result.executionTime;
-        
+
         // Retry logic
         const retryCount = task.metadata?.retryCount || 0;
         if (retryCount < this.config.maxRetries) {
@@ -207,19 +261,21 @@ export class LoopManager implements ILoopManager {
           task.metadata.retryCount = retryCount + 1;
           task.status = TaskStatus.PENDING;
           this.taskQueue.enqueue(task);
-          logger.warn(`Task ${task.id} failed, retrying (${retryCount + 1}/${this.config.maxRetries})`, { 
-            task: task.id 
+          logger.warn(`Task ${task.id} failed, retrying (${retryCount + 1}/${this.config.maxRetries})`, {
+            task: task.id
           });
         } else {
-          logger.error(`Task ${task.id} failed after ${retryCount} retries: ${result.error}`, { 
-            task: task.id 
+          this.loopIterationCount++; // Count failed retries too
+          logger.error(`Task ${task.id} failed after ${retryCount} retries: ${result.error}`, {
+            task: task.id
           });
         }
       }
     } catch (error) {
       this.failedTasksCount++;
-      logger.error(`Unexpected error executing task ${task.id}: ${error}`, { 
-        task: task.id 
+      this.loopIterationCount++;
+      logger.error(`Unexpected error executing task ${task.id}: ${error}`, {
+        task: task.id
       });
     }
   }

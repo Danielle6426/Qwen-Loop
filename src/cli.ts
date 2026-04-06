@@ -101,9 +101,13 @@ program
     console.log('Press Ctrl+C to stop\n');
     
     // Print status every 30 seconds
-    setInterval(() => {
+    const statusInterval = setInterval(() => {
+      if (!loopManager.isRunning()) {
+        clearInterval(statusInterval);
+        return;
+      }
       const stats = loopManager.getStats();
-      console.log(loopManager.getAgentStatusReport());
+      console.log('\n' + loopManager.getAgentStatusReport());
       console.log(loopManager.getTaskQueueStats());
     }, 30000);
     

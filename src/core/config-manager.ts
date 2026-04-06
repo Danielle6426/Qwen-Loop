@@ -9,7 +9,9 @@ const DEFAULT_CONFIG: Partial<LoopConfig> = {
   maxRetries: 3,
   workingDirectory: process.cwd(),
   logLevel: 'info',
-  enableAutoStart: false
+  enableAutoStart: false,
+  maxLoopIterations: 0, // 0 = unlimited
+  enableSelfTaskGeneration: true
 };
 
 export class ConfigManager {
@@ -114,12 +116,14 @@ export class ConfigManager {
           workingDirectory: './project'
         }
       ],
-      maxConcurrentTasks: 3,
+      maxConcurrentTasks: 1,
       loopInterval: 5000,
-      maxRetries: 3,
+      maxRetries: 2,
       workingDirectory: './project',
       logLevel: 'info',
-      enableAutoStart: false
+      enableAutoStart: false,
+      maxLoopIterations: 5,
+      enableSelfTaskGeneration: true
     };
 
     return JSON.stringify(exampleConfig, null, 2);

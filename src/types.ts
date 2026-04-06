@@ -108,6 +108,8 @@ export interface LoopStats {
   activeAgents: number;
   uptime: number;
   averageExecutionTime: number;
+  loopIterations?: number;
+  maxLoopIterations?: number;
 }
 
 export interface LoopConfig {
@@ -118,4 +120,6 @@ export interface LoopConfig {
   workingDirectory: string;
   logLevel: 'error' | 'warn' | 'info' | 'debug';
   enableAutoStart: boolean;
+  maxLoopIterations?: number; // Max number of loop iterations (0 = unlimited)
+  enableSelfTaskGeneration?: boolean; // Auto-generate tasks by analyzing project
 }
