@@ -1,0 +1,6 @@
+# Logs Directory
+
+This directory contains application logs.
+It is created automatically when the application runs.
+
+- `qwen-loop.log` - Main application log (rotated, max 5MB x 5 files)

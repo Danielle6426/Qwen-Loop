@@ -35,14 +35,26 @@ npm start -- init
 First, make sure Qwen Code CLI is installed and available in your PATH:
 
 ```bash
-# Install Qwen Code CLI globally
+# Option 1: npm
 npm install -g @qwen-code/qwen-code
 
-# Or verify it's already installed
+# Option 2: Script (Linux/macOS)
+curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.sh | bash
+
+# Option 3: Script (Windows, in admin CMD)
+curl -fsSL -o %TEMP%\install-qwen.bat https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.bat && %TEMP%\install-qwen.bat
+
+# Verify installation
 qwen --help
 ```
 
-### 2. Initialize Configuration
+> **Note:** Restart your terminal after installation for environment variables to load.
+
+### 2. Authentication
+
+Qwen Code uses **Qwen OAuth** (free tier). On first run, it will automatically prompt you to log in via browser. No API keys needed.
+
+### 3. Initialize Configuration
 
 ```bash
 npm install
@@ -51,7 +63,7 @@ npm start -- init
 
 This creates a `qwen-loop.config.json` file with example configuration.
 
-### 3. Configure Your Project
+### 4. Configure Your Project
 
 Edit `qwen-loop.config.json`:
 
@@ -72,7 +84,7 @@ Edit `qwen-loop.config.json`:
 }
 ```
 
-### 4. Start the Loop
+### 5. Start the Loop
 
 ```bash
 npm start -- start
@@ -310,7 +322,8 @@ tail -f logs/qwen-loop.log
 
 ### Agent Not Starting
 - Verify Qwen Code CLI is installed: `qwen --help`
-- Check Qwen Code is in your PATH
+- Restart terminal if recently installed (env vars need reload)
+- Ensure you're authenticated: run `qwen` once to complete OAuth
 - Review logs: `logs/qwen-loop.log`
 
 ### Tasks Failing
@@ -326,9 +339,10 @@ tail -f logs/qwen-loop.log
 
 ## 📋 Requirements
 
-- Node.js 18+ 
+- Node.js 18+
 - npm or yarn
-- Qwen Code CLI (installed globally or in PATH)
+- Qwen Code CLI (see installation steps above)
+- Qwen OAuth authentication (free, one-time browser login)
 
 ## 🤝 Contributing
 

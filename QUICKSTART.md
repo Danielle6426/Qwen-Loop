@@ -5,12 +5,28 @@
 ### 1. Install Qwen Code CLI
 
 ```bash
-# Install Qwen Code CLI globally
+# Option 1: npm
 npm install -g @qwen-code/qwen-code
 
-# Or verify it's already installed
+# Option 2: Script (Linux/macOS)
+curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.sh | bash
+
+# Option 3: Script (Windows, in admin CMD)
+curl -fsSL -o %TEMP%\install-qwen.bat https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.bat && %TEMP%\install-qwen.bat
+
+# Verify
 qwen --help
 ```
+
+> **Note:** Restart your terminal after installation.
+
+### 1.5. Authenticate (one-time)
+
+```bash
+qwen
+```
+
+First run will open a browser for Qwen OAuth login (free). Close after successful login.
 
 ### 2. Install Dependencies
 ```bash
@@ -136,7 +152,12 @@ Press `Ctrl+C` to gracefully shut down the system.
 
 **Issue**: "Qwen Code CLI not found"
 - Install Qwen Code CLI: `npm install -g @qwen-code/qwen-code`
-- Verify it's in PATH: `qwen --help`
+- Or use install script (see step 1)
+- Restart terminal, then verify: `qwen --help`
+
+**Issue**: "Authentication required"
+- Run `qwen` once to complete OAuth login in browser
+- Or run `qwen auth login`
 
 **Issue**: Agents not executing tasks
 - Check Qwen Code CLI is installed
