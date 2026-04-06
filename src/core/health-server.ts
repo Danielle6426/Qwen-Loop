@@ -1,5 +1,6 @@
-import { createServer, Server } from 'http';
+import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
 import { HealthChecker } from './health-checker.js';
+import { HealthReport, AgentHealthStatus } from '../types.js';
 import { logger } from '../logger.js';
 
 /**
@@ -71,10 +72,12 @@ export class HealthServer {
     return `http://${this.host}:${this.port}`;
   }
 
-  // Private methods
-
-  private handleRequest(req: any, res: any): void {
-    const url = new URL(req.url, `http://${this.host}:${this.port}`);
+  /**
+   * Handle incoming HTTP requests and route to appropriate handlers
+   */
+  private handleRequest(req: IncomingMessage, res: ServerResponse): void {
+    const requestUrl = req.url ?? '/';
+    const url = new URL(requestUrl, `http://${this.host}:${this.port}`);
     const path = url.pathname;
 
     // Set CORS headers
@@ -125,7 +128,10 @@ export class HealthServer {
     }
   }
 
-  private handleFullHealthReport(req: any, res: any): void {
+  /**
+   * Handle full health check request, returning HTML or JSON based on Accept header
+   */
+  private handleFullHealthReport(req: IncomingMessage, res: ServerResponse): void {
     // Check Accept header to determine response format
     const acceptHeader = req.headers['accept'] || '';
     const wantsJson = acceptHeader.includes('application/json');
@@ -137,7 +143,10 @@ export class HealthServer {
     }
   }
 
-  private handleJsonReport(res: any): void {
+  /**
+   * Handle JSON health report request
+   */
+  private handleJsonReport(res: ServerResponse): void {
     const report = this.healthChecker.getJsonReport();
 
     res.writeHead(200, {
@@ -148,7 +157,10 @@ export class HealthServer {
     res.end(JSON.stringify(report, null, 2));
   }
 
-  private handleHtmlReport(res: any): void {
+  /**
+   * Handle HTML health report request
+   */
+  private handleHtmlReport(res: ServerResponse): void {
     const report = this.healthChecker.getJsonReport();
     const html = this.generateHtmlReport(report);
 
@@ -160,7 +172,10 @@ export class HealthServer {
     res.end(html);
   }
 
-  private handleLiveness(res: any): void {
+  /**
+   * Handle liveness check request
+   */
+  private handleLiveness(res: ServerResponse): void {
     // Simple liveness check - is the process running?
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -170,7 +185,10 @@ export class HealthServer {
     }));
   }
 
-  private handleReadiness(res: any): void {
+  /**
+   * Handle readiness check request
+   */
+  private handleReadiness(res: ServerResponse): void {
     // Readiness check - is the system ready to accept tasks?
     const report = this.healthChecker.getJsonReport();
     const isReady = report.status !== 'unhealthy' && report.agents.some(a => a.healthy);
@@ -195,7 +213,10 @@ export class HealthServer {
     }
   }
 
-  private generateHtmlReport(report: any): string {
+  /**
+   * Generate an HTML report from the health report data
+   */
+  private generateHtmlReport(report: HealthReport): string {
     const statusColor = report.status === 'healthy' ? '#22c55e' : report.status === 'degraded' ? '#f59e0b' : '#ef4444';
     const statusIcon = report.status === 'healthy' ? '🟢' : report.status === 'degraded' ? '🟡' : '🔴';
 
@@ -275,7 +296,7 @@ export class HealthServer {
 
     <div class="card">
       <h2>🤖 Agents (${report.agents.length})</h2>
-      ${report.agents.map((agent: any) => {
+      ${report.agents.map((agent: AgentHealthStatus) => {
         const statusClass = agent.healthy ? (agent.status === 'busy' ? 'busy' : 'healthy') : 'error';
         return `
       <div class="agent">

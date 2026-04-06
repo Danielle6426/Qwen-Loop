@@ -48,11 +48,11 @@ export class LoopManager implements ILoopManager {
    */
   async start(): Promise<void> {
     if (this.isLoopRunning) {
-      logger.warn('Loop is already running');
+      logger.warn('Loop already running');
       return;
     }
 
-    logger.info('Starting Qwen Loop...');
+    logger.info('Starting Qwen Loop');
 
     // Initialize all agents
     await this.orchestrator.initializeAll();
@@ -70,7 +70,9 @@ export class LoopManager implements ILoopManager {
         }
         logger.info(`Generated ${tasks.length} initial tasks`);
       } catch (error) {
-        logger.error(`Failed to generate self-directed tasks: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error('Failed to generate self-directed tasks', { 
+          error: error instanceof Error ? error.message : String(error) 
+        });
         // Continue without self-task generation
       }
     }
@@ -83,10 +85,13 @@ export class LoopManager implements ILoopManager {
     // Initialize health checker
     this.updateHealthChecker();
 
-    const iterLimit = this.config.maxLoopIterations && this.config.maxLoopIterations > 0 
-      ? `${this.config.maxLoopIterations} iterations` 
+    const iterLimit = this.config.maxLoopIterations && this.config.maxLoopIterations > 0
+      ? `${this.config.maxLoopIterations} iterations`
       : 'unlimited';
-    logger.info(`Loop started (interval: ${this.config.loopInterval}ms, limit: ${iterLimit})`);
+    logger.info(`Loop started`, { 
+      duration: this.config.loopInterval,
+      maxIterations: iterLimit
+    });
 
     // Start the loop
     this.runLoop();
@@ -195,7 +200,7 @@ export class LoopManager implements ILoopManager {
     };
 
     this.taskQueue.enqueue(task);
-    logger.debug(`Task added: ${description.slice(0, 60)}${description.length > 60 ? '...' : ''}`, {
+    logger.debug(`Task enqueued: ${description.slice(0, 60)}${description.length > 60 ? '...' : ''}`, {
       task: task.id,
       priority
     });
@@ -237,7 +242,7 @@ export class LoopManager implements ILoopManager {
         await this.processLoopIteration();
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error(`Error in loop iteration: ${errorMessage}`);
+        logger.error('Error in loop iteration', { error: errorMessage });
       }
     }, this.config.loopInterval);
 
@@ -246,7 +251,7 @@ export class LoopManager implements ILoopManager {
       await this.processLoopIteration();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`Error in initial loop iteration: ${errorMessage}`);
+      logger.error('Error in initial loop iteration', { error: errorMessage });
     }
   }
 
@@ -254,7 +259,7 @@ export class LoopManager implements ILoopManager {
     // Check if we've reached max concurrent tasks
     const runningTasks = this.taskQueue.getTasksByStatus(TaskStatus.RUNNING);
     if (runningTasks.length >= this.config.maxConcurrentTasks) {
-      logger.debug(`Max concurrent tasks reached (${this.config.maxConcurrentTasks})`);
+      logger.debug(`Max concurrent tasks reached (${this.config.maxConcurrentTasks})`, undefined, 10000);
       return;
     }
 
@@ -273,7 +278,7 @@ export class LoopManager implements ILoopManager {
     }
 
     if (!task) {
-      logger.debug('No tasks in queue');
+      logger.debug('No tasks in queue', undefined, 10000);
       return;
     }
 
@@ -310,8 +315,6 @@ export class LoopManager implements ILoopManager {
           task: task.id,
           duration: result.executionTime
         });
-
-        // Track in health checker
         if (task.assignedAgent) {
           this.healthChecker.trackTaskCompletion(task.assignedAgent, true, result.executionTime);
         }
@@ -338,14 +341,16 @@ export class LoopManager implements ILoopManager {
           task.metadata.retryCount = retryCount + 1;
           task.status = TaskStatus.PENDING;
           this.taskQueue.enqueue(task);
-          logger.warn(`Task failed, retrying (${retryCount + 1}/${this.config.maxRetries}): ${task.description.slice(0, 50)}...`, {
+          logger.warn(`Task failed, retrying (${retryCount + 1}/${this.config.maxRetries})`, {
             task: task.id,
-            retryCount: retryCount + 1
+            retryCount: retryCount + 1,
+            error: result.error?.slice(0, 100)
           });
         } else {
           this.loopIterationCount++; // Count failed retries too
-          logger.error(`Task failed after ${retryCount} retries: ${result.error}`, {
-            task: task.id
+          logger.error(`Task failed after ${retryCount} retries`, {
+            task: task.id,
+            error: result.error
           });
         }
       }
@@ -353,9 +358,9 @@ export class LoopManager implements ILoopManager {
       this.failedTasksCount++;
       this.loopIterationCount++;
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`Task execution error: ${errorMessage}`, {
+      logger.error('Task execution error', {
         task: task.id,
-        error
+        error: errorMessage
       });
 
       // Track in health checker

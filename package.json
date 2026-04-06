@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "dist/index.js",
   "bin": {
-    "qwen-loop": "dist/index.js"
+    "qwen-loop": "dist/cli.js"
   },
   "scripts": {
     "build": "npx tsc",

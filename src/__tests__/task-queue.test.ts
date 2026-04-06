@@ -261,11 +261,14 @@ test('TaskQueue - updateTaskStatus', async (t) => {
     assert.equal(updatedTask?.status, TaskStatus.RUNNING);
   });
 
-  await t.test('should not throw for non-existent task', () => {
+  await t.test('should throw error for non-existent task', () => {
     const queue = new TaskQueue();
 
-    // Should not throw
-    queue.updateTaskStatus('non-existent', TaskStatus.RUNNING);
+    // Should throw with descriptive error message
+    assert.throws(
+      () => queue.updateTaskStatus('non-existent', TaskStatus.RUNNING),
+      /TaskQueue\.updateTaskStatus: no task found/
+    );
   });
 });
 

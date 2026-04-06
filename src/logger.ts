@@ -41,7 +41,7 @@ interface StructuredLogEntry {
 function sanitizeMetadata(metadata: LogMetadata): LogMetadata {
   const sanitized: LogMetadata = { ...metadata };
   const sensitiveKeys = ['apikey', 'api_key', 'token', 'secret', 'password', 'authorization', 'auth'];
-  
+
   for (const [key, value] of Object.entries(sanitized)) {
     if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
       sanitized[key] = '[REDACTED]';
@@ -49,8 +49,25 @@ function sanitizeMetadata(metadata: LogMetadata): LogMetadata {
       sanitized[key] = value.replace(/((?:api[_-]?key|token|secret|password)\s*[:=]\s*)\S+/gi, '$1[REDACTED]');
     }
   }
-  
+
   return sanitized;
+}
+
+/**
+ * Truncate long strings in metadata to prevent excessive log sizes
+ */
+function truncateMetadata(metadata: Record<string, unknown>, maxLength = 500): Record<string, unknown> {
+  const truncated: Record<string, unknown> = {};
+  
+  for (const [key, value] of Object.entries(metadata)) {
+    if (typeof value === 'string' && value.length > maxLength) {
+      truncated[key] = `${value.slice(0, maxLength)}... [truncated, ${value.length - maxLength} chars omitted]`;
+    } else {
+      truncated[key] = value;
+    }
+  }
+  
+  return truncated;
 }
 
 /**
@@ -60,6 +77,7 @@ function sanitizeMetadata(metadata: LogMetadata): LogMetadata {
 class Logger {
   private static instance: Logger;
   private logger: winston.Logger;
+  private logSampling: Map<string, number> = new Map(); // Track sampling counters for deduplication
 
   private constructor(level: string = 'info') {
     // Console format: human-readable with colors
@@ -68,9 +86,9 @@ class Logger {
       winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
       winston.format.printf(({ timestamp, level, message, agent, task, project, duration, ...meta }) => {
         const agentTag = agent ? chalk.cyan(`[${agent}]`) : '';
-        const taskTag = task ? chalk.yellow(`[Task:${task}]`) : '';
+        const taskTag = task ? chalk.yellow(`[Task:${task.slice(0, 8)}]`) : '';
         const projectTag = project ? chalk.magenta(`[${project}]`) : '';
-        const durationTag = duration !== undefined ? chalk.green(`[${duration}ms]`) : '';
+        const durationTag = duration !== undefined ? chalk.green(`[${this.formatDuration(duration as number)}]`) : '';
 
         const levels: Record<string, string> = {
           error: chalk.red('ERROR'),
@@ -80,17 +98,18 @@ class Logger {
         };
 
         let logLine = `${chalk.gray(timestamp)} ${levels[level]} ${agentTag}${projectTag}${taskTag}${durationTag} ${message}`;
-        
-        // Add any additional metadata that doesn't have dedicated tags
-        const remainingMeta = Object.entries(meta).filter(([key]) => 
-          !['timestamp', 'level', 'message', Symbol.for('level')].includes(key)
+
+        // Add only essential metadata to console (not everything)
+        const essentialKeys = ['priority', 'retryCount', 'status', 'count'];
+        const essentialMeta = Object.entries(meta).filter(([key]) =>
+          essentialKeys.includes(key)
         );
-        
-        if (remainingMeta.length > 0) {
-          const metaStr = remainingMeta.map(([k, v]) => `${k}=${v}`).join(' ');
+
+        if (essentialMeta.length > 0) {
+          const metaStr = essentialMeta.map(([k, v]) => `${k}=${v}`).join(' ');
           logLine += chalk.gray(` {${metaStr}}`);
         }
-        
+
         return logLine;
       })
     );
@@ -100,12 +119,12 @@ class Logger {
       winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
       winston.format.errors({ stack: true }),
       winston.format((info) => {
-        const structured: any = {
+        const structured: StructuredLogEntry = {
           timestamp: String(info.timestamp || ''),
           level: info.level,
           message: String(info.message || '')
         };
-        
+
         if (info.agent) structured.agent = String(info.agent);
         if (info.task) structured.task = String(info.task);
         if (info.project) structured.project = String(info.project);
@@ -115,14 +134,16 @@ class Logger {
         if (info.error) {
           structured.error = info.error instanceof Error ? (info.error.stack || info.error.message) : String(info.error);
         }
-        
-        // Add remaining metadata fields
+
+        // Add remaining metadata with truncation for long strings
         Object.entries(info).forEach(([key, value]) => {
           if (!['timestamp', 'level', 'message', 'agent', 'task', 'project', 'duration', 'error', Symbol.for('level')].includes(key)) {
-            structured[key] = value;
+            structured[key] = typeof value === 'string' && value.length > 1000 
+              ? `${value.slice(0, 1000)}... [truncated]` 
+              : value;
           }
         });
-        
+
         return structured;
       })(),
       winston.format.json()
@@ -143,16 +164,45 @@ class Logger {
       ),
       transports: [
         new winston.transports.Console({
-          format: consoleFormat
+          format: consoleFormat,
+          // Reduce debug output verbosity in console
+          silent: false
         }),
         new winston.transports.File({
           filename: 'logs/qwen-loop.log',
           format: fileFormat,
           maxsize: 5242880, // 5MB
-          maxFiles: 5
+          maxFiles: 5,
+          tailable: true
         })
       ]
     });
+  }
+
+  /**
+   * Format duration in human-readable format
+   */
+  private formatDuration(ms: number): string {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
+
+  /**
+   * Check if a debug message should be sampled (deduplicated)
+   * Returns true if the message should be logged
+   */
+  private shouldSample(message: string, intervalMs = 5000): boolean {
+    const now = Date.now();
+    const lastTime = this.logSampling.get(message) || 0;
+    
+    if (now - lastTime > intervalMs) {
+      this.logSampling.set(message, now);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -191,15 +241,37 @@ class Logger {
    * @param metadata - Optional metadata (agent, task, project, error, etc.)
    */
   error(message: string, metadata?: LogMetadata) {
-    this.logger.error(message, metadata);
+    // Always include full error details in file logs
+    const enhancedMetadata = metadata ? { ...metadata } : {};
+    if (metadata?.error) {
+      const error = metadata.error;
+      enhancedMetadata.errorDetails = error instanceof Error 
+        ? { message: error.message, stack: error.stack, name: error.name }
+        : error;
+    }
+    this.logger.error(message, enhancedMetadata);
   }
 
   /**
-   * Log a debug message
+   * Log a debug message with automatic sampling to reduce verbosity
    * @param message - The message to log
    * @param metadata - Optional metadata (agent, task, project, duration, etc.)
+   * @param sampleInterval - Milliseconds between duplicate messages (default: 5000)
    */
-  debug(message: string, metadata?: LogMetadata) {
+  debug(message: string, metadata?: LogMetadata, sampleInterval?: number) {
+    // Sample repetitive debug messages (e.g., "No tasks in queue" polling)
+    if (sampleInterval !== undefined && !this.shouldSample(message, sampleInterval)) {
+      return;
+    }
+    this.logger.debug(message, metadata);
+  }
+
+  /**
+   * Log a debug message without sampling (for unique, important debug info)
+   * @param message - The message to log
+   * @param metadata - Optional metadata
+   */
+  debugOnce(message: string, metadata?: LogMetadata) {
     this.logger.debug(message, metadata);
   }
 }
@@ -212,4 +284,39 @@ export const logger = Logger.getInstance();
  */
 export function setLogLevel(level: 'error' | 'warn' | 'info' | 'debug') {
   Logger.getInstance(level);
+}
+
+/**
+ * Helper to create a duration tracker for timing operations
+ * @returns Object with start() and end() methods for tracking duration
+ */
+export function createDurationTracker() {
+  const startTime = Date.now();
+  return {
+    /** Get elapsed milliseconds since creation */
+    elapsed: () => Date.now() - startTime
+  };
+}
+
+/**
+ * Build standardized log metadata from common context
+ * @param context - Context object with agent, task, project info
+ * @param extras - Additional metadata to include
+ * @returns Sanitized metadata object ready for logging
+ */
+export function buildLogContext(
+  context: { agent?: string; task?: string; project?: string },
+  extras?: Record<string, unknown>
+): LogMetadata {
+  const metadata: LogMetadata = {};
+  
+  if (context.agent) metadata.agent = context.agent;
+  if (context.task) metadata.task = context.task;
+  if (context.project) metadata.project = context.project;
+  
+  if (extras) {
+    Object.assign(metadata, extras);
+  }
+  
+  return metadata;
 }

@@ -1,4 +1,4 @@
-import { LoopConfig, LoopStats, ProjectConfig, AgentConfig, AgentType, TaskPriority, HealthReport } from '../types.js';
+import { LoopConfig, LoopStats, ProjectConfig, AgentConfig, AgentType, TaskPriority, TaskStatus, HealthReport, AgentHealthStatus, Task } from '../types.js';
 import { LoopManager } from './loop-manager.js';
 import { QwenAgent, CustomAgent } from '../agents/index.js';
 import { logger } from '../logger.js';
@@ -16,12 +16,20 @@ export class MultiProjectManager {
   private loopInterval: NodeJS.Timeout | null = null;
   private globalConfig: LoopConfig;
 
+  /**
+   * Creates a new MultiProjectManager instance.
+   *
+   * @param globalConfig - The global configuration that defines default settings for all projects.
+   */
   constructor(globalConfig: LoopConfig) {
     this.globalConfig = globalConfig;
   }
 
   /**
-   * Initialize all projects from config
+   * Initialize all projects from the global configuration.
+   * Sets up LoopManager instances, agents, and orchestrators for each configured project.
+   *
+   * @throws Error if no projects are configured in the global config.
    */
   async initialize(): Promise<void> {
     if (!this.globalConfig.projects || this.globalConfig.projects.length === 0) {
@@ -38,9 +46,22 @@ export class MultiProjectManager {
   }
 
   /**
-   * Add a single project
+   * Add a new project to the manager.
+   * Creates a LoopManager, initializes agents, and registers them with the orchestrator.
+   *
+   * @param projectConfig - Configuration for the project including name, working directory, and optional agent overrides.
+   * @throws Error if projectConfig is null/undefined or if project name is empty.
    */
   async addProject(projectConfig: ProjectConfig): Promise<void> {
+    if (!projectConfig) {
+      throw new Error('Project configuration cannot be null or undefined.');
+    }
+    if (!projectConfig.name || projectConfig.name.trim().length === 0) {
+      throw new Error('Project name must be provided and cannot be empty.');
+    }
+    if (!projectConfig.workingDirectory) {
+      throw new Error(`Project "${projectConfig.name}" is missing a working directory.`);
+    }
     const projectLoopConfig = this.buildProjectConfig(projectConfig);
 
     const loopManager = new LoopManager(projectLoopConfig);
@@ -80,12 +101,19 @@ export class MultiProjectManager {
   }
 
   /**
-   * Start cycling through all projects
+   * Start cycling through all projects sequentially.
+   * Begins processing tasks from the first project and continues round-robin.
+   *
+   * @throws Error if no projects have been initialized before starting.
    */
   async start(): Promise<void> {
     if (this.isRunning) {
       logger.warn('Multi-project loop is already running');
       return;
+    }
+
+    if (this.projectNames.length === 0) {
+      throw new Error('Cannot start multi-project loop: no projects initialized. Call initialize() first.');
     }
 
     this.isRunning = true;
@@ -99,7 +127,8 @@ export class MultiProjectManager {
   }
 
   /**
-   * Stop all projects
+   * Stop all project loops and clean up resources.
+   * Halts task processing across all managed projects and clears the scheduling interval.
    */
   async stop(): Promise<void> {
     this.isRunning = false;
@@ -121,24 +150,32 @@ export class MultiProjectManager {
   }
 
   /**
-   * Get combined health report across all projects
+   * Get combined health report across all projects.
+   * Aggregates agent health, task throughput, and priority/status breakdowns from all managed projects.
+   *
+   * @returns A comprehensive HealthReport covering all projects.
+   * @throws Error if no projects have been initialized.
    */
   getHealthReport(): HealthReport {
+    if (this.projectNames.length === 0) {
+      throw new Error('Cannot generate health report: no projects have been initialized. Call initialize() first.');
+    }
+
     // Combine stats from all projects into a single health report
     // Use the first project's health checker as the base
     const firstProject = this.projectManagers.get(this.projectNames[0]);
     if (!firstProject) {
-      throw new Error('No projects initialized');
+      throw new Error('Cannot generate health report: first project manager not found despite being in project list.');
     }
 
     const baseReport = firstProject.getHealthReport();
 
     // Aggregate agent information from all projects
-    const allAgents: any[] = [];
+    const allAgents: AgentHealthStatus[] = [];
     let totalCompleted = 0;
     let totalFailed = 0;
     let totalExecutionTime = 0;
-    const allTasks: any[] = [];
+    const allTasks: Task[] = [];
 
     for (const name of this.projectNames) {
       const manager = this.projectManagers.get(name);
@@ -149,16 +186,10 @@ export class MultiProjectManager {
       totalCompleted += projectReport.taskThroughput.completedTasks;
       totalFailed += projectReport.taskThroughput.failedTasks;
       totalExecutionTime += projectReport.taskThroughput.averageExecutionTime * projectReport.taskThroughput.completedTasks;
-      
+
       // Collect tasks
       const allProjectTasks = manager.getTaskQueue().getAllTasks();
-      for (const task of allProjectTasks) {
-        allTasks.push({
-          id: task.id,
-          status: task.status,
-          priority: task.priority
-        });
-      }
+      allTasks.push(...allProjectTasks);
     }
 
     // Update the base report with combined data
@@ -167,15 +198,26 @@ export class MultiProjectManager {
     baseReport.taskThroughput.failedTasks = totalFailed;
     baseReport.taskThroughput.totalTasks = totalCompleted + totalFailed;
     baseReport.taskThroughput.averageExecutionTime = totalCompleted > 0 ? totalExecutionTime / totalCompleted : 0;
-    
+
     const totalTasks = totalCompleted + totalFailed;
     baseReport.taskThroughput.errorRate = totalTasks > 0 ? (totalFailed / totalTasks) * 100 : 0;
     baseReport.taskThroughput.successRate = totalTasks > 0 ? (totalCompleted / totalTasks) * 100 : 100;
 
     // Recalculate priority and status breakdown
-    const byPriority: any = { critical: 0, high: 0, medium: 0, low: 0 };
-    const byStatus: any = { pending: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };
-    
+    const byPriority: Record<TaskPriority, number> = {
+      [TaskPriority.CRITICAL]: 0,
+      [TaskPriority.HIGH]: 0,
+      [TaskPriority.MEDIUM]: 0,
+      [TaskPriority.LOW]: 0
+    };
+    const byStatus: Record<TaskStatus, number> = {
+      [TaskStatus.PENDING]: 0,
+      [TaskStatus.RUNNING]: 0,
+      [TaskStatus.COMPLETED]: 0,
+      [TaskStatus.FAILED]: 0,
+      [TaskStatus.CANCELLED]: 0
+    };
+
     for (const task of allTasks) {
       byPriority[task.priority] = (byPriority[task.priority] || 0) + 1;
       byStatus[task.status] = (byStatus[task.status] || 0) + 1;
@@ -188,7 +230,10 @@ export class MultiProjectManager {
   }
 
   /**
-   * Get combined stats across all projects
+   * Get combined stats across all projects as a formatted string.
+   * Includes per-project statistics like completed/failed tasks and average execution time.
+   *
+   * @returns A formatted string containing stats for all managed projects.
    */
   getAllStats(): string {
     let report = '\n=== Multi-Project Status ===\n\n';
@@ -211,7 +256,10 @@ export class MultiProjectManager {
   }
 
   /**
-   * Get agent status for all projects
+   * Get agent status for all projects as a formatted string.
+   * Includes per-project agent status sections.
+   *
+   * @returns A formatted string containing agent status for all projects.
    */
   getAllAgentStatus(): string {
     let report = '\n=== Agent Status (All Projects) ===\n';
@@ -228,23 +276,33 @@ export class MultiProjectManager {
   }
 
   /**
-   * Get project names
+   * Get the names of all managed projects.
+   *
+   * @returns An array of project name strings.
    */
   getProjectNames(): string[] {
     return this.projectNames;
   }
 
   /**
-   * Check if running
+   * Check if the multi-project loop is currently running.
+   *
+   * @returns True if the loop is active, false otherwise.
    */
   isRunningStatus(): boolean {
     return this.isRunning;
   }
 
   /**
-   * Get loop manager for a specific project
+   * Get the LoopManager instance for a specific project.
+   *
+   * @param name - The name of the project to retrieve.
+   * @returns The LoopManager for the project, or undefined if not found.
    */
   getProjectManager(name: string): LoopManager | undefined {
+    if (!name || name.trim().length === 0) {
+      throw new Error('Project name must be provided and cannot be empty.');
+    }
     return this.projectManagers.get(name);
   }
 

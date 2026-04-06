@@ -12,8 +12,12 @@ export class AgentOrchestrator implements IAgentOrchestrator {
   /**
    * Register an agent with the orchestrator
    * @param agent - The agent instance to register
+   * @throws Error if agent is null or undefined
    */
   registerAgent(agent: IAgent): void {
+    if (!agent) {
+      throw new Error('Cannot register null or undefined agent');
+    }
     this.agents.set(agent.id, agent);
     logger.debug(`Agent registered: ${agent.name}`, { agent: agent.name });
   }

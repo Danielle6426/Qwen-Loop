@@ -23,14 +23,38 @@ export class HealthChecker {
   private agentLastTaskTime: Map<string, number> = new Map();
 
   /**
-   * Update the health checker with current agent information
+   * Update the health checker with current agent information.
+   *
+   * Replaces the internal list of agents used for generating health reports.
+   * Subsequent calls to `generateHealthReport()` will reflect the updated agents.
+   *
+   * @param agents - Array of IAgent instances representing the current agents in the system.
+   *                 Passing an empty array is valid and will clear the agent list.
+   * @throws TypeError if `agents` is not an array.
    */
   updateAgents(agents: IAgent[]): void {
+    if (!Array.isArray(agents)) {
+      throw new TypeError('Expected an array of agents');
+    }
     this.agents = agents;
   }
 
   /**
-   * Update loop statistics
+   * Update loop statistics used for throughput and configuration reporting.
+   *
+   * Only the properties provided in `stats` will be updated; omitted properties
+   * retain their previous values. All properties are optional.
+   *
+   * @param stats - Object containing any subset of loop statistics to update:
+   *   - `loopStartTime`: When the current loop iteration started.
+   *   - `completedTasks`: Total number of successfully completed tasks.
+   *   - `failedTasks`: Total number of failed tasks.
+   *   - `totalExecutionTime`: Cumulative execution time in milliseconds.
+   *   - `maxConcurrentTasks`: Maximum number of concurrent tasks observed.
+   *   - `loopInterval`: Interval between loop iterations in milliseconds.
+   *   - `maxRetries`: Maximum retry attempts for failed tasks.
+   *   - `workingDirectory`: Current working directory path.
+   * @throws TypeError if `stats` is not an object.
    */
   updateLoopStats(stats: {
     loopStartTime?: Date | null;
@@ -42,6 +66,9 @@ export class HealthChecker {
     maxRetries?: number;
     workingDirectory?: string;
   }): void {
+    if (stats === null || typeof stats !== 'object') {
+      throw new TypeError('Expected an object for loop stats');
+    }
     if (stats.loopStartTime !== undefined) this.loopStartTime = stats.loopStartTime;
     if (stats.completedTasks !== undefined) this.completedTasksCount = stats.completedTasks;
     if (stats.failedTasks !== undefined) this.failedTasksCount = stats.failedTasks;
@@ -53,19 +80,52 @@ export class HealthChecker {
   }
 
   /**
-   * Update task queue information
+   * Update task queue information used for priority breakdown and throughput metrics.
+   *
+   * Replaces the entire task queue state. Call this whenever the task queue
+   * changes to keep health reports accurate.
+   *
+   * @param tasks - Array of task objects, each containing `id`, `status`, and `priority`.
+   *                Passing an empty array is valid and will clear the queue.
+   * @throws TypeError if `tasks` is not an array.
    */
   updateTaskQueue(tasks: Array<{ id: string; status: TaskStatus; priority: TaskPriority }>): void {
+    if (!Array.isArray(tasks)) {
+      throw new TypeError('Expected an array of tasks');
+    }
     this.taskQueue.clear();
     for (const task of tasks) {
+      if (typeof task.id !== 'string' || !task.status || !task.priority) {
+        logger.warn('Invalid task entry skipped in updateTaskQueue', task);
+        continue;
+      }
       this.taskQueue.set(task.id, { status: task.status, priority: task.priority });
     }
   }
 
   /**
-   * Track task execution for agent-specific metrics
+   * Track task execution for agent-specific metrics.
+   *
+   * Call this after each task completes to maintain per-agent success/failure
+   * counts and timestamps used in health reports.
+   *
+   * @param agentId - Unique identifier of the agent that executed the task.
+   * @param success - Whether the task completed successfully.
+   * @param executionTime - Time taken to execute the task in milliseconds.
+   * @throws TypeError if `agentId` is not a string or `success` is not a boolean.
    */
   trackTaskCompletion(agentId: string, success: boolean, executionTime: number): void {
+    if (typeof agentId !== 'string') {
+      throw new TypeError('Expected a string for agentId');
+    }
+    if (typeof success !== 'boolean') {
+      throw new TypeError('Expected a boolean for success');
+    }
+    if (typeof executionTime !== 'number' || executionTime < 0) {
+      logger.warn('Invalid executionTime provided, defaulting to 0', { executionTime });
+      executionTime = 0;
+    }
+
     const counts = this.agentTaskCounts.get(agentId) || { total: 0, failed: 0 };
     counts.total++;
     if (!success) counts.failed++;
@@ -74,7 +134,18 @@ export class HealthChecker {
   }
 
   /**
-   * Generate a comprehensive health report
+   * Generate a comprehensive health report with current system metrics.
+   *
+   * Collects and aggregates data across multiple dimensions:
+   * - Agent health: status, task counts, failure rates, and error states for each agent.
+   * - Resource usage: CPU, memory, heap utilization, and active process count.
+   * - Task throughput: completion rates, error rates, and average execution times.
+   * - Priority breakdown: distribution of tasks by priority level and status.
+   *
+   * The report also includes an overall system status (`healthy`, `degraded`, or `unhealthy`)
+   * determined by thresholds on error rates, memory usage, and agent states.
+   *
+   * @returns A `HealthReport` object containing all collected metrics and an overall status.
    */
   generateHealthReport(): HealthReport {
     const warnings: string[] = [];
@@ -121,9 +192,25 @@ export class HealthChecker {
   }
 
   /**
-   * Format health report for console output
+   * Format a health report for human-readable console output.
+   *
+   * Produces a formatted string with visual separators, emoji indicators for
+   * status, and organized sections for agents, throughput, resources, and configuration.
+   * Suitable for logging or printing to a terminal.
+   *
+   * @param report - The `HealthReport` object to format, typically obtained from
+   *                 `generateHealthReport()` or `getJsonReport()`.
+   * @returns A formatted string suitable for console display.
+   * @throws TypeError if `report` is null or not a valid HealthReport object.
    */
   formatReportForConsole(report: HealthReport): string {
+    if (!report || typeof report !== 'object') {
+      throw new TypeError('Expected a valid HealthReport object');
+    }
+    if (!report.timestamp || !report.status || !Array.isArray(report.agents)) {
+      throw new TypeError('Invalid HealthReport: missing required fields');
+    }
+
     let output = '\n╔══════════════════════════════════════════════════════════╗\n';
     output +=    '║          Qwen Loop - System Health Report               ║\n';
     output +=    '╚══════════════════════════════════════════════════════════╝\n\n';
@@ -216,7 +303,14 @@ export class HealthChecker {
   }
 
   /**
-   * Generate a compact JSON-friendly health report
+   * Generate a compact JSON-friendly health report.
+   *
+   * This is an alias for `generateHealthReport()`. The returned `HealthReport`
+   * object contains only plain data types (numbers, strings, booleans, arrays,
+   * and objects) making it safe to serialize with `JSON.stringify()` for APIs,
+   * file output, or programmatic consumption.
+   *
+   * @returns A `HealthReport` object suitable for JSON serialization.
    */
   getJsonReport(): HealthReport {
     return this.generateHealthReport();
@@ -281,17 +375,17 @@ export class HealthChecker {
     try {
       if (platform() === 'win32') {
         // Windows: use wmic
-        const output = execSync('wmic cpu get loadpercentage', { encoding: 'utf8' });
+        const output = execSync('wmic cpu get loadpercentage', { encoding: 'utf8', timeout: 5000 });
         const match = output.match(/(\d+)/);
-        cpuUsage = match ? parseInt(match[1]) : 0;
+        cpuUsage = match ? parseInt(match[1], 10) : 0;
       } else {
         // Unix: use top
-        const output = execSync("top -l 1 | grep 'CPU usage' | awk '{print $3}'", { encoding: 'utf8', timeout: 2000 });
+        const output = execSync("top -l 1 | grep 'CPU usage' | awk '{print $3}'", { encoding: 'utf8', timeout: 5000 });
         cpuUsage = parseFloat(output) || 0;
       }
-    } catch {
+    } catch (err) {
+      logger.debug('Failed to get system CPU usage, using fallback estimation', { error: err instanceof Error ? err.message : String(err) });
       // Fallback: estimate from process CPU usage
-      const cpus = os.cpus();
       cpuUsage = this.estimateCpuUsage();
     }
 
@@ -312,21 +406,31 @@ export class HealthChecker {
     };
   }
 
+  /**
+   * Estimate CPU usage synchronously based on process CPU time deltas.
+   *
+   * Takes two quick CPU usage samples 50ms apart and computes the percentage
+   * of CPU time consumed by the current process during that window. This is a
+   * lightweight approximation used as a fallback when system-level commands fail.
+   *
+   * @returns Estimated CPU usage percentage (0-100) for the current process.
+   */
   private estimateCpuUsage(): number {
-    // Simple estimation based on process CPU time
     const startUsage = process.cpuUsage();
     const start = Date.now();
-    
-    // Measure over a short period
-    return new Promise<number>(resolve => {
-      setTimeout(() => {
-        const endUsage = process.cpuUsage(startUsage);
-        const elapsed = Date.now() - start;
-        const totalCpuTime = (endUsage.user + endUsage.system) / 1000; // Convert to ms
-        const cpuPercent = (totalCpuTime / elapsed) * 100;
-        resolve(Math.min(cpuPercent, 100));
-      }, 100);
-    }) as unknown as number;
+
+    // Block briefly to get a measurable delta (synchronous estimation)
+    const measureDurationMs = 50;
+    const end = start + measureDurationMs;
+    while (Date.now() < end) {
+      // Busy-wait for the measurement window
+    }
+
+    const endUsage = process.cpuUsage(startUsage);
+    const elapsed = Date.now() - start;
+    const totalCpuTime = (endUsage.user + endUsage.system) / 1000; // Convert microseconds to ms
+    const cpuPercent = (totalCpuTime / elapsed) * 100;
+    return Math.min(cpuPercent, 100);
   }
 
   private getTaskThroughput(): TaskThroughput {
@@ -403,7 +507,7 @@ export class HealthChecker {
   }
 
   private generateSummary(
-    status: string,
+    status: 'healthy' | 'degraded' | 'unhealthy',
     agents: AgentHealthStatus[],
     throughput: TaskThroughput,
     resources: ResourceUsage
