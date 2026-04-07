@@ -1,8 +1,9 @@
 import { Task, TaskPriority, TaskStatus } from '../types.js';
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
-import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
-import { join, extname } from 'path';
+import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { join, extname, relative } from 'path';
+import { spawn } from 'child_process';
 
 interface ProjectAnalysis {
   files: FileMeta[];
@@ -13,7 +14,8 @@ interface ProjectAnalysis {
   hasConfig: boolean;
   complexity: 'low' | 'medium' | 'high';
   largeFiles: FileMeta[];
-  filesWithoutTests: string[];
+  fileTree: string;
+  recentChanges: string;
 }
 
 interface FileMeta {
@@ -22,211 +24,45 @@ interface FileMeta {
   extension: string;
 }
 
-interface TaskTemplate {
+interface AIGeneratedTask {
   description: string;
-  priority: TaskPriority;
-  category: string;
-  condition?: (analysis: ProjectAnalysis) => boolean;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW' | 'CRITICAL';
+  reason: string;
+  category?: string;
 }
 
 /**
- * Task template pool with 30+ diverse tasks.
- * Generator picks 6-10 random tasks each cycle to avoid repetition.
+ * Fallback templates if AI generation fails
  */
-const TASK_TEMPLATES: TaskTemplate[] = [
-  // === TESTS (HIGH priority) ===
-  {
-    description: 'Add unit tests for core modules (orchestrator, task queue, loop manager). Test edge cases, error handling, and normal flows.',
-    priority: TaskPriority.HIGH,
-    category: 'tests',
-    condition: (a) => !a.hasTests || a.files.filter(f => f.path.includes('test')).length < 3
-  },
-  {
-    description: 'Add integration tests for CLI commands to verify end-to-end workflows work correctly.',
-    priority: TaskPriority.HIGH,
-    category: 'tests-integration'
-  },
-  {
-    description: 'Add test coverage reporting. Set up coverage thresholds and generate coverage reports.',
-    priority: TaskPriority.MEDIUM,
-    category: 'tests-coverage'
-  },
-
-  // === CODE QUALITY (MEDIUM priority) ===
-  {
-    description: 'Review and fix TypeScript types. Replace any "any" types with proper interfaces or generics.',
-    priority: TaskPriority.MEDIUM,
-    category: 'type-safety'
-  },
-  {
-    description: 'Add input validation to all public APIs and CLI command arguments. Validate before processing.',
-    priority: TaskPriority.MEDIUM,
-    category: 'validation'
-  },
-  {
-    description: 'Improve error handling: add try-catch blocks, proper error messages, and graceful degradation.',
-    priority: TaskPriority.MEDIUM,
-    category: 'error-handling'
-  },
-  {
-    description: 'Add JSDoc comments to all exported functions and classes. Include @param, @returns, and @throws tags.',
-    priority: TaskPriority.MEDIUM,
-    category: 'jsdoc'
-  },
-
-  // === REFACTORING (based on file size) ===
-  {
-    description: 'Split large files (>400 lines) into smaller, focused modules. Extract interfaces and reduce coupling.',
-    priority: TaskPriority.HIGH,
-    category: 'refactor-large-files',
-    condition: (a) => a.largeFiles.length > 0
-  },
-  {
-    description: 'Refactor duplicated code into shared utility functions or base classes. Follow DRY principle.',
-    priority: TaskPriority.MEDIUM,
-    category: 'refactor-dry'
-  },
-  {
-    description: 'Apply dependency injection pattern to reduce coupling between modules and improve testability.',
-    priority: TaskPriority.MEDIUM,
-    category: 'refactor-di'
-  },
-
-  // === DOCUMENTATION ===
-  {
-    description: 'Create API reference documentation. Document all public methods, parameters, and return types.',
-    priority: TaskPriority.MEDIUM,
-    category: 'docs-api'
-  },
-  {
-    description: 'Add code examples and usage patterns to README. Show common use cases with copy-paste examples.',
-    priority: TaskPriority.LOW,
-    category: 'docs-examples'
-  },
-  {
-    description: 'Create a CONTRIBUTING.md guide for developers. Include setup, testing, and code style guidelines.',
-    priority: TaskPriority.LOW,
-    category: 'docs-contributing',
-    condition: (a) => !a.files.some(f => f.path.toLowerCase().includes('contributing'))
-  },
-  {
-    description: 'Add inline code comments explaining complex logic, algorithms, or business rules.',
-    priority: TaskPriority.LOW,
-    category: 'docs-comments'
-  },
-
-  // === PERFORMANCE ===
-  {
-    description: 'Profile application startup time and optimize slow initialization paths.',
-    priority: TaskPriority.LOW,
-    category: 'perf-startup'
-  },
-  {
-    description: 'Add caching for expensive computations (file reads, config parsing, project analysis).',
-    priority: TaskPriority.MEDIUM,
-    category: 'perf-caching'
-  },
-  {
-    description: 'Optimize memory usage: review large object allocations, implement lazy loading where appropriate.',
-    priority: TaskPriority.LOW,
-    category: 'perf-memory'
-  },
-
-  // === SECURITY ===
-  {
-    description: 'Review for security issues: validate all user inputs, sanitize file paths, prevent command injection.',
-    priority: TaskPriority.HIGH,
-    category: 'security'
-  },
-  {
-    description: 'Add rate limiting or throttling for API endpoints and CLI operations to prevent abuse.',
-    priority: TaskPriority.LOW,
-    category: 'security-rate-limit'
-  },
-
-  // === CLI USABILITY ===
-  {
-    description: 'Improve CLI error messages: make them actionable with suggestions on how to fix the problem.',
-    priority: TaskPriority.MEDIUM,
-    category: 'cli-errors'
-  },
-  {
-    description: 'Add interactive prompts for missing required arguments. Guide users through command usage.',
-    priority: TaskPriority.LOW,
-    category: 'cli-interactive'
-  },
-  {
-    description: 'Add command aliases and shorthand flags for frequently used commands (e.g., -s for --start).',
-    priority: TaskPriority.LOW,
-    category: 'cli-aliases'
-  },
-  {
-    description: 'Add progress indicators (spinners, progress bars) for long-running operations.',
-    priority: TaskPriority.LOW,
-    category: 'cli-progress'
-  },
-
-  // === LOGGING & MONITORING ===
-  {
-    description: 'Review logging levels: ensure debug/info/warn/error are used appropriately. Remove verbose debug logs from production.',
-    priority: TaskPriority.MEDIUM,
-    category: 'logging-levels'
-  },
-  {
-    description: 'Add structured logging with consistent field names for log analysis and monitoring tools.',
-    priority: TaskPriority.LOW,
-    category: 'logging-structured'
-  },
-  {
-    description: 'Add health check endpoint or CLI command that reports system status: agent health, task throughput, error rates.',
-    priority: TaskPriority.LOW,
-    category: 'health-check',
-    condition: (a) => !a.files.some(f => f.path.includes('health'))
-  },
-
-  // === CONFIG & SETUP ===
-  {
-    description: 'Add configuration validation with helpful error messages. Validate config on startup and report issues.',
-    priority: TaskPriority.MEDIUM,
-    category: 'config-validation'
-  },
-  {
-    description: 'Create example configuration files with comments explaining each option.',
-    priority: TaskPriority.LOW,
-    category: 'config-examples',
-    condition: (a) => !a.files.some(f => f.path.includes('example') && f.path.includes('config'))
-  },
-  {
-    description: 'Add environment variable support for sensitive configuration values (API keys, secrets).',
-    priority: TaskPriority.MEDIUM,
-    category: 'config-env-vars'
-  },
+const FALLBACK_TASKS = [
+  { description: 'Add unit tests for core modules', priority: TaskPriority.HIGH, category: 'tests' },
+  { description: 'Improve documentation with examples and API reference', priority: TaskPriority.MEDIUM, category: 'docs' },
+  { description: 'Review and fix TypeScript types, replace any "any" with proper types', priority: TaskPriority.MEDIUM, category: 'quality' },
+  { description: 'Add error handling and validation to public APIs', priority: TaskPriority.MEDIUM, category: 'quality' },
+  { description: 'Optimize slow operations and add caching where appropriate', priority: TaskPriority.LOW, category: 'performance' },
+  { description: 'Review security: validate inputs, sanitize paths, prevent injection', priority: TaskPriority.HIGH, category: 'security' },
+  { description: 'Improve CLI error messages with actionable suggestions', priority: TaskPriority.LOW, category: 'cli' },
+  { description: 'Add structured logging with consistent field names', priority: TaskPriority.LOW, category: 'logging' },
 ];
 
 /**
- * Analyzes the project and generates self-directed tasks.
- * Qwen will autonomously decide what to work on based on project state.
+ * AI-powered task generator using Qwen CLI.
+ * Analyzes project and calls Qwen to generate specific, contextual tasks.
  */
 export class SelfTaskGenerator {
   private workingDir: string;
-  private completedTasks: Set<string>;
-  private taskPool: Task[];
-  private lastUsedCategories: string[];
+  private completedTaskSignatures: Set<string>;
+  private qwenPath: string;
 
-  /**
-   * Create a new SelfTaskGenerator
-   * @param workingDir - The working directory to analyze
-   */
   constructor(workingDir: string) {
     this.workingDir = workingDir;
-    this.completedTasks = new Set();
-    this.taskPool = [];
-    this.lastUsedCategories = [];
+    this.completedTaskSignatures = new Set();
+    const isWindows = process.platform === 'win32';
+    this.qwenPath = process.env.QWEN_PATH || (isWindows ? 'qwen.cmd' : 'qwen');
   }
 
   /**
-   * Analyze the project directory and gather metadata
-   * @returns Object containing project analysis including file count, types, and complexity
+   * Analyze project structure and gather context for AI
    */
   analyzeProject(): ProjectAnalysis {
     const analysis: ProjectAnalysis = {
@@ -238,222 +74,314 @@ export class SelfTaskGenerator {
       hasConfig: false,
       complexity: 'low',
       largeFiles: [],
-      filesWithoutTests: []
+      fileTree: '',
+      recentChanges: ''
     };
 
-    this.walkDirectory(this.workingDir, analysis, 0, 3);
+    this.walkDirectory(this.workingDir, analysis, 0, 2);
 
-    // Determine complexity
-    if (analysis.totalLines > 5000) {
-      analysis.complexity = 'high';
-    } else if (analysis.totalLines > 1000) {
-      analysis.complexity = 'medium';
-    }
+    if (analysis.totalLines > 5000) analysis.complexity = 'high';
+    else if (analysis.totalLines > 1000) analysis.complexity = 'medium';
 
-    // Check for tests
     analysis.hasTests = analysis.files.some(f =>
       f.path.includes('test') || f.path.includes('spec') || f.path.includes('__tests__')
     );
-
-    // Check for docs
     analysis.hasDocs = analysis.files.some(f =>
-      f.path.toLowerCase().includes('readme') ||
-      f.path.toLowerCase().includes('docs') ||
-      extname(f.path) === '.md'
+      f.path.toLowerCase().includes('readme') || extname(f.path) === '.md'
     );
-
-    // Check for config
     analysis.hasConfig = analysis.files.some(f =>
-      ['package.json', 'tsconfig.json', '.eslintrc', '.prettierrc'].some(name =>
-        f.path.includes(name)
-      )
+      ['package.json', 'tsconfig.json'].some(name => f.path.includes(name))
     );
 
-    // Find large files (>400 lines) that need refactoring
-    analysis.largeFiles = analysis.files.filter(f => f.lines > 400);
+    analysis.largeFiles = analysis.files.filter(f => f.lines > 300);
 
-    // Find source files without corresponding test files
-    for (const file of analysis.files) {
-      if (file.extension === '.ts' && !file.path.includes('test') && !file.path.includes('__tests__')) {
-        const testPath = file.path.replace('.ts', '.test.ts');
-        if (!analysis.files.some(f => f.path === testPath)) {
-          analysis.filesWithoutTests.push(file.path);
-        }
-      }
-    }
+    // Build file tree string for AI context
+    analysis.fileTree = this.buildFileTree(analysis.files);
+
+    // Get recent git changes for context
+    analysis.recentChanges = this.getRecentChanges();
 
     return analysis;
   }
 
   /**
-   * Generate diverse self-directed tasks based on project analysis.
-   * Picks 6-10 random tasks from 30+ templates to avoid repetition.
-   * @param analysis - The project analysis result
-   * @returns Array of task descriptions with priorities and categories
+   * Generate tasks by calling Qwen AI with project analysis
    */
   generateTasks(analysis: ProjectAnalysis): Task[] {
-    // Filter templates by conditions
-    const eligibleTemplates = TASK_TEMPLATES.filter(t =>
-      !t.condition || t.condition(analysis)
-    );
+    try {
+      logger.info('🤖 Asking Qwen AI to analyze project and generate tasks...');
+      const prompt = this.buildAIPrompt(analysis);
+      const aiResponse = this.callQwenSync(prompt);
 
-    // Shuffle for variety
-    const shuffled = this.shuffleArray(eligibleTemplates);
-
-    // Pick 6-10 tasks (more for larger projects)
-    const count = analysis.totalLines > 3000 ? 10 : analysis.totalLines > 1000 ? 8 : 6;
-    const selected = shuffled.slice(0, Math.min(count, shuffled.length));
-
-    // Avoid repeating categories used recently
-    const diverseTasks = this.prioritizeDiversity(selected, analysis);
-
-    logger.debug(`Generated ${diverseTasks.length} tasks from ${eligibleTemplates.length} eligible templates`);
-    return diverseTasks;
-  }
-
-  /**
-   * Prioritize tasks from different categories to avoid repetition.
-   */
-  private prioritizeDiversity(templates: TaskTemplate[], analysis: ProjectAnalysis): Task[] {
-    const tasks: Task[] = [];
-    const usedCategories = new Set(this.lastUsedCategories);
-
-    // First pass: pick tasks from unused categories
-    for (const template of templates) {
-      if (!usedCategories.has(template.category)) {
-        tasks.push(this.createTask(template, analysis));
-        usedCategories.add(template.category);
-      }
-    }
-
-    // Second pass: fill remaining with less-recent categories
-    if (tasks.length < 6) {
-      for (const template of templates) {
-        if (tasks.length >= 6) break;
-        if (!tasks.some(t => t.metadata?.category === template.category)) {
-          tasks.push(this.createTask(template, analysis));
+      if (aiResponse) {
+        const tasks = this.parseAIResponse(aiResponse);
+        if (tasks.length > 0) {
+          logger.info(`✅ AI generated ${tasks.length} tasks`);
+          return this.deduplicateAndPrioritize(tasks);
         }
       }
-    }
 
-    return tasks.slice(0, Math.max(6, tasks.length));
+      logger.warn('⚠️ AI generation failed, using fallback templates');
+      return this.generateFallbackTasks(analysis);
+    } catch (error) {
+      logger.error(`AI task generation error: ${error instanceof Error ? error.message : String(error)}`);
+      return this.generateFallbackTasks(analysis);
+    }
   }
 
   /**
-   * Create a Task object from a template
+   * Build prompt for Qwen AI to analyze project and generate tasks
    */
-  private createTask(template: TaskTemplate, analysis: ProjectAnalysis): Task {
-    // Customize description based on analysis
-    let description = template.description;
+  private buildAIPrompt(analysis: ProjectAnalysis): string {
+    return `You are an expert software architect analyzing a project to suggest improvement tasks.
 
-    // Add context for refactoring tasks
-    if (template.category === 'refactor-large-files' && analysis.largeFiles.length > 0) {
-      const largeFileList = analysis.largeFiles.slice(0, 3).map(f => {
-        const relativePath = f.path.replace(this.workingDir + '/', '');
-        return `${relativePath} (${f.lines} lines)`;
-      }).join(', ');
-      description += ` Target files: ${largeFileList}`;
-    }
+## Project Analysis
+- Files: ${analysis.files.length}
+- Total lines: ${analysis.totalLines}
+- Complexity: ${analysis.complexity}
+- Has tests: ${analysis.hasTests ? 'Yes' : 'No'}
+- Has documentation: ${analysis.hasDocs ? 'Yes' : 'No'}
 
-    // Add context for test tasks
-    if (template.category === 'tests' && analysis.filesWithoutTests.length > 0) {
-      const uncoveredCount = analysis.filesWithoutTests.length;
-      description = `Add unit tests for ${uncoveredCount} untested source files. Start with core modules.`;
-    }
+## File Structure
+${analysis.fileTree}
 
-    return {
-      id: uuidv4(),
-      description,
-      priority: template.priority,
-      status: TaskStatus.PENDING,
-      createdAt: new Date(),
-      metadata: { category: template.category, selfGenerated: true }
-    };
+## Large Files (may need refactoring)
+${analysis.largeFiles.length > 0 ? analysis.largeFiles.slice(0, 5).map(f =>
+  `- ${relative(this.workingDir, f.path)} (${f.lines} lines, ${f.extension})`
+).join('\n') : 'None'}
+
+## Recent Changes
+${analysis.recentChanges || 'No recent changes'}
+
+## Task
+Analyze this project and suggest 5-8 specific, actionable improvement tasks.
+
+Requirements:
+1. Each task should be SPECIFIC to this project (not generic advice)
+2. Reference actual files, patterns, or issues you identify
+3. Prioritize based on actual project needs
+4. Avoid repeating tasks already done
+5. Focus on: testing, code quality, documentation, performance, security
+
+Return ONLY a valid JSON array (no markdown, no explanation):
+[
+  {
+    "description": "Specific task description referencing actual files/patterns",
+    "priority": "HIGH|MEDIUM|LOW|CRITICAL",
+    "reason": "Why this task is needed, referencing specific files or patterns",
+    "category": "tests|quality|docs|performance|security|refactor|cli|logging|config"
+  }
+]`;
   }
 
   /**
-   * Get the next task from the pool, cycling through categories
-   * Avoids repeating the same task too soon
-   * @param analysis - The project analysis result
-   * @returns A new Task object, or null if no tasks available
+   * Call Qwen CLI synchronously and return output
+   */
+  private callQwenSync(prompt: string): string | null {
+    return new Promise<string | null>((resolve) => {
+      const timeout = 120000; // 2 minutes timeout
+      const timeoutId = setTimeout(() => {
+        resolve(null);
+      }, timeout);
+
+      const args = [
+        prompt,
+        '--yolo',
+        '-o', 'text',
+        '--no-color'
+      ];
+
+      try {
+        const qwenProcess = spawn(this.qwenPath, args, {
+          cwd: this.workingDir,
+          shell: true,
+          windowsHide: true
+        });
+
+        let output = '';
+        let errorOutput = '';
+
+        qwenProcess.stdout?.on('data', (data) => {
+          output += data.toString();
+        });
+
+        qwenProcess.stderr?.on('data', (data) => {
+          errorOutput += data.toString();
+        });
+
+        qwenProcess.on('close', (code) => {
+          clearTimeout(timeoutId);
+          if (code === 0 && output.trim()) {
+            resolve(output);
+          } else {
+            logger.debug(`Qwen exited with code ${code}, stderr: ${errorOutput.slice(0, 200)}`);
+            resolve(null);
+          }
+        });
+
+        qwenProcess.on('error', (error) => {
+          clearTimeout(timeoutId);
+          logger.debug(`Qwen spawn error: ${error.message}`);
+          resolve(null);
+        });
+      } catch (error) {
+        clearTimeout(timeoutId);
+        logger.debug(`Qwen call failed: ${error instanceof Error ? error.message : String(error)}`);
+        resolve(null);
+      }
+    });
+  }
+
+  /**
+   * Parse AI response JSON into tasks
+   */
+  private parseAIResponse(response: string): Task[] {
+    // Extract JSON from response (handle markdown code blocks)
+    let jsonStr = response;
+    const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1];
+    }
+
+    // Find JSON array
+    const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
+    if (!arrayMatch) {
+      logger.debug('No JSON array found in AI response');
+      return [];
+    }
+
+    try {
+      const tasks: AIGeneratedTask[] = JSON.parse(arrayMatch[0]);
+
+      return tasks
+        .filter(t => t.description && t.priority)
+        .map(t => ({
+          id: uuidv4(),
+          description: `${t.description} (Reason: ${t.reason || 'AI suggested'})`,
+          priority: this.mapPriority(t.priority),
+          status: TaskStatus.PENDING,
+          createdAt: new Date(),
+          metadata: {
+            category: t.category || 'ai-generated',
+            selfGenerated: true,
+            aiGenerated: true,
+            reason: t.reason
+          }
+        }));
+    } catch (error) {
+      logger.debug(`Failed to parse AI response as JSON: ${error instanceof Error ? error.message : String(error)}`);
+      logger.debug(`Response preview: ${jsonStr.slice(0, 500)}...`);
+      return [];
+    }
+  }
+
+  /**
+   * Deduplicate tasks and prioritize based on project needs
+   */
+  private deduplicateAndPrioritize(tasks: Task[]): Task[] {
+    // Filter out completed tasks
+    const uniqueTasks = tasks.filter(t => {
+      const signature = t.description.slice(0, 50);
+      if (this.completedTaskSignatures.has(signature)) {
+        return false;
+      }
+      this.completedTaskSignatures.add(signature);
+      return true;
+    });
+
+    // Limit to 8 tasks max
+    const priorityOrder = [TaskPriority.CRITICAL, TaskPriority.HIGH, TaskPriority.MEDIUM, TaskPriority.LOW];
+    const sortedTasks = uniqueTasks.sort((a, b) => {
+      return priorityOrder.indexOf(a.priority) - priorityOrder.indexOf(b.priority);
+    });
+
+    return sortedTasks.slice(0, 8);
+  }
+
+  /**
+   * Generate fallback tasks if AI generation fails
+   */
+  private generateFallbackTasks(analysis: ProjectAnalysis): Task[] {
+    const tasks: Task[] = [];
+
+    if (!analysis.hasTests) {
+      tasks.push({
+        id: uuidv4(),
+        description: FALLBACK_TASKS[0].description,
+        priority: FALLBACK_TASKS[0].priority,
+        status: TaskStatus.PENDING,
+        createdAt: new Date(),
+        metadata: { category: FALLBACK_TASKS[0].category, selfGenerated: true, aiGenerated: false }
+      });
+    }
+
+    if (!analysis.hasDocs) {
+      tasks.push({
+        id: uuidv4(),
+        description: FALLBACK_TASKS[1].description,
+        priority: FALLBACK_TASKS[1].priority,
+        status: TaskStatus.PENDING,
+        createdAt: new Date(),
+        metadata: { category: FALLBACK_TASKS[1].category, selfGenerated: true, aiGenerated: false }
+      });
+    }
+
+    if (analysis.largeFiles.length > 0) {
+      const largeFile = analysis.largeFiles[0];
+      tasks.push({
+        id: uuidv4(),
+        description: `Refactor ${relative(this.workingDir, largeFile.path)} (${largeFile.lines} lines) into smaller modules`,
+        priority: TaskPriority.HIGH,
+        status: TaskStatus.PENDING,
+        createdAt: new Date(),
+        metadata: { category: 'refactor', selfGenerated: true, aiGenerated: false }
+      });
+    }
+
+    // Add 2-3 random quality tasks
+    const shuffled = [...FALLBACK_TASKS].sort(() => Math.random() - 0.5);
+    for (const task of shuffled.slice(2, 5)) {
+      tasks.push({
+        id: uuidv4(),
+        description: task.description,
+        priority: task.priority,
+        status: TaskStatus.PENDING,
+        createdAt: new Date(),
+        metadata: { category: task.category, selfGenerated: true, aiGenerated: false }
+      });
+    }
+
+    return tasks.slice(0, 6);
+  }
+
+  /**
+   * Get the next task, generating new ones if pool is empty
    */
   getNextTask(analysis: ProjectAnalysis): Task | null {
-    if (this.taskPool.length === 0) {
-      this.taskPool = this.generateTasks(analysis);
-    }
-
-    // Pick task avoiding recently used categories
-    for (let i = 0; i < this.taskPool.length; i++) {
-      const task = this.taskPool[i];
-      const category = (task.metadata?.category as string) || '';
-
-      if (!this.lastUsedCategories.includes(category)) {
-        this.taskPool.splice(i, 1);
-        this.trackCategory(category);
-        return task;
-      }
-    }
-
-    // All tasks are from recent categories, pick anyway
-    if (this.taskPool.length > 0) {
-      const task = this.taskPool.shift()!;
-      this.trackCategory((task.metadata?.category as string) || 'unknown');
-      return task;
-    }
-
-    // Pool empty, regenerate
-    this.taskPool = this.generateTasks(analysis);
-    this.completedTasks.clear();
-
-    if (this.taskPool.length > 0) {
-      const task = this.taskPool.shift()!;
-      this.trackCategory((task.metadata?.category as string) || 'unknown');
-      return task;
-    }
-
-    logger.warn('No tasks available from SelfTaskGenerator');
-    return null;
+    const tasks = this.generateTasks(analysis);
+    return tasks.length > 0 ? tasks[0] : null;
   }
 
   /**
-   * Track category usage to avoid repetition
-   */
-  private trackCategory(category: string): void {
-    this.lastUsedCategories.push(category);
-    // Keep last 5 categories
-    if (this.lastUsedCategories.length > 5) {
-      this.lastUsedCategories = this.lastUsedCategories.slice(-5);
-    }
-    this.completedTasks.add(category);
-  }
-
-  /**
-   * Reset the completed tasks tracking to start fresh
+   * Reset completed task tracking
    */
   resetCompleted(): void {
-    this.completedTasks.clear();
-    this.taskPool = [];
-    this.lastUsedCategories = [];
+    this.completedTaskSignatures.clear();
   }
 
-  // Private helpers
+  // Helper methods
 
   private walkDirectory(dir: string, analysis: ProjectAnalysis, depth: number, maxDepth: number): void {
-    if (depth > maxDepth) return;
-    if (!existsSync(dir)) return;
+    if (depth > maxDepth || !existsSync(dir)) return;
 
     try {
       const entries = readdirSync(dir);
-
       for (const entry of entries) {
-        // Skip node_modules, .git, dist, logs
         if (['node_modules', '.git', 'dist', 'logs'].includes(entry)) continue;
 
         const fullPath = join(dir, entry);
-
         try {
           const stats = statSync(fullPath);
-
           if (stats.isDirectory()) {
             this.walkDirectory(fullPath, analysis, depth + 1, maxDepth);
           } else if (stats.isFile()) {
@@ -462,31 +390,64 @@ export class SelfTaskGenerator {
               const lines = content.split('\n').length;
               const extension = extname(entry);
 
-              const fileMeta: FileMeta = { path: fullPath, lines, extension };
-              analysis.files.push(fileMeta);
+              analysis.files.push({ path: fullPath, lines, extension });
               analysis.totalLines += lines;
 
               const count = analysis.fileTypes.get(extension) || 0;
               analysis.fileTypes.set(extension, count + 1);
-            } catch (readError) {
-              logger.debug(`Could not read file ${fullPath}: ${readError instanceof Error ? readError.message : String(readError)}`);
+            } catch {
+              // Skip unreadable files
             }
           }
-        } catch (statError) {
-          logger.debug(`Could not stat ${fullPath}: ${statError instanceof Error ? statError.message : String(statError)}`);
+        } catch {
+          // Skip inaccessible files
         }
       }
-    } catch (dirError) {
-      logger.debug(`Could not read directory ${dir}: ${dirError instanceof Error ? dirError.message : String(dirError)}`);
+    } catch {
+      // Skip inaccessible directories
     }
   }
 
-  private shuffleArray<T>(array: T[]): T[] {
-    const shuffled = [...array];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  private buildFileTree(files: FileMeta[]): string {
+    const tree: string[] = [];
+    const maxFiles = 30;
+
+    const sortedFiles = [...files].sort((a, b) => a.path.localeCompare(b.path)).slice(0, maxFiles);
+
+    for (const file of sortedFiles) {
+      const relPath = relative(this.workingDir, file.path);
+      const parts = relPath.split(/[\\/]/);
+      const indent = '  '.repeat(parts.length - 1);
+      tree.push(`${indent}├── ${parts[parts.length - 1]} (${file.lines} lines)`);
     }
-    return shuffled;
+
+    if (files.length > maxFiles) {
+      tree.push(`... and ${files.length - maxFiles} more files`);
+    }
+
+    return tree.join('\n');
+  }
+
+  private getRecentChanges(): string {
+    try {
+      const { spawnSync } = require('child_process');
+      const result = spawnSync('git', ['log', '--oneline', '-5'], {
+        cwd: this.workingDir,
+        encoding: 'utf-8'
+      });
+      return result.stdout || '';
+    } catch {
+      return '';
+    }
+  }
+
+  private mapPriority(priority: string): TaskPriority {
+    const map: Record<string, TaskPriority> = {
+      CRITICAL: TaskPriority.CRITICAL,
+      HIGH: TaskPriority.HIGH,
+      MEDIUM: TaskPriority.MEDIUM,
+      LOW: TaskPriority.LOW
+    };
+    return map[priority.toUpperCase()] || TaskPriority.MEDIUM;
   }
 }
